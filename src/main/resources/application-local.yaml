@@ -30,6 +30,7 @@ spring:
     redis:
       host: localhost
       port: 6379
+      password: ${REDIS_PASSWORD:}
 
 server-uri: http://localhost:8080
 front-uri: http://localhost:5173
