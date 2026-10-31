@@ -11,6 +11,8 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password:
+  flyway:
+    enabled: false # 테스트는 H2 + Hibernate create-drop 으로 스키마를 만든다 (마이그레이션 SQL 은 MySQL 문법)
   jpa:
     hibernate:
       ddl-auto: create-drop
