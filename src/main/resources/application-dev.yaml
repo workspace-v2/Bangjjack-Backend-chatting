@@ -31,6 +31,7 @@ spring:
     redis:
       host: ${REDIS_HOST}
       port: 6379
+      password: ${REDIS_PASSWORD:}
 
 server-uri: ${SERVER_URI}
 front-uri: ${FRONT_URI}
@@ -51,14 +52,31 @@ ai:
     recommended-roommates-cache-ttl: 21600
     recommended-roommates-chunk-size: 5
 
+server:
+  tomcat:
+    mbeanregistry:
+      enabled: true # tomcat_threads_* 메트릭
+
+# actuator는 별도 포트(8081)로 분리: 외부(Caddy → 8080)에는 노출되지 않고
+# 보안 그룹상 모니터링 서버만 접근 가능
 management:
+  server:
+    port: ${MANAGEMENT_SERVER_PORT:8081}
   endpoints:
     web:
       exposure:
-        include: health
+        include: health, prometheus
   endpoint:
     health:
       show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      maximum-expected-value:
+        http.server.requests: 10s
 
 dev:
   secret: ${DEV_SECRET}

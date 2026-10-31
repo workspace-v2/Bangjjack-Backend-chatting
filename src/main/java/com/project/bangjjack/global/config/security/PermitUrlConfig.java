@@ -16,7 +16,8 @@ public class PermitUrlConfig {
                 "/swagger-resources/**",
                 "/ws/chat/**",
                 "/actuator/health",
-                "/actuator/health/**"
+                "/actuator/health/**",
+                "/actuator/prometheus" // management 포트(8081) 전용, 외부 미노출
         };
     }
 }

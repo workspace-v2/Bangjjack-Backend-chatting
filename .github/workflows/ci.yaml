@@ -1,13 +1,16 @@
 name: bangjjack CI 파이프라인
 
+# PR 검증 전용. main/dev 에 push 되면 cd.yaml 이 테스트 → 빌드 → 배포를 수행한다.
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -27,7 +30,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: wrapper
-          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
+          cache-read-only: true
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
