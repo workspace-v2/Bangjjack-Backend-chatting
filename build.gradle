@@ -31,6 +31,10 @@ dependencies {
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0'
 
+    // DB 스키마 마이그레이션 (src/main/resources/db/migration)
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    runtimeOnly 'org.flywaydb:flyway-mysql'
+
     // Redis - Redisson
     implementation 'org.redisson:redisson:4.1.0'
 
