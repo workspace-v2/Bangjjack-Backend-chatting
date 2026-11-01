@@ -12,7 +12,8 @@ overview:
   summary: >
     채팅방 참여자가 순수 WebSocket(Raw WebSocket, STOMP 미사용)으로 메시지를 전송하면,
     DB에 동기 저장 후 트랜잭션 커밋 시점에 Redis Pub/Sub을 통해 같은 방 구독자 전체에게 broadcast한다.
-    Redis 장애 시 WebSocketBroadcaster(WebSocketSessionStore 기반) fallback으로 단일 인스턴스 내 전달을 보장한다.
+    Redis 발행 실패 시 로컬 fallback 없이 에러 로그와 실패 메트릭(chat_pubsub_publish_failures_total)만 기록한다.
+    (로컬 fallback은 현재 인스턴스 세션에만 전달되어 다중 인스턴스 간 수신 불일치를 유발하므로 제거. 메시지는 DB에 커밋된 상태이므로 조회로 복구)
     메시지 전송 전 반드시 SUBSCRIBE 메시지로 방을 구독해야 하며, 미구독 상태에서 SEND 시 40605 에러를 반환한다.
   user_story: >
     As a 채팅방 참여자, I want to 실시간으로 메시지를 전송하고 싶다,
@@ -21,7 +22,7 @@ overview:
     - 순수 WebSocket 기반 실시간 메시지 전송 (STOMP 미사용)
     - DB 동기 저장 후 @TransactionalEventListener(AFTER_COMMIT)으로 Redis 발행 시점 보장
     - Redis Pub/Sub 기반 broadcast (다중 인스턴스 대응)
-    - Redis 장애 시 WebSocketBroadcaster fallback
+    - Redis 발행 실패 시 로컬 fallback 없이 실패 메트릭 기록 (인스턴스 간 수신 일관성 우선)
     - DB auto-increment id 기반 메시지 순서 보장
     - WebSocketSessionRegistry(Redis)로 userId당 최신 세션 1개 추적 (Last-Connection-Wins)
 
@@ -164,7 +165,7 @@ technical_spec:
       action: >
         트랜잭션 커밋 확정 후에만 실행.
         Redis Pub/Sub channel "chat:room:{roomId}" 에 ChatMessageBroadcast JSON 발행.
-        RedisException 발생 시 WebSocketBroadcaster.broadcastToRoom() fallback 직접 호출.
+        발행 실패 시 예외를 전파하지 않고 error 로그 + 실패 카운터(chat.pubsub.publish.failures{channel=chat_message}) 증가. 로컬 broadcast는 하지 않음.
 
     - step: 7
       layer: Infrastructure (ChatMessageSubscriber)
@@ -244,12 +245,12 @@ testing_strategy:
     - "status=CLOSED 채팅방 SEND → ERROR 40603"
     - "수신자 status=LEFT 상태에서 메시지 수신 → 수신자 auto-rejoin(status=ACTIVE), 채팅방 목록 재노출 확인"
     - "존재하지 않는 roomId SEND → ERROR 40602"
-    - "Redis 다운 시 WebSocketBroadcaster fallback 경로로 broadcast 전달 확인"
+    - "Redis 다운 시 어떤 인스턴스에도 로컬 broadcast되지 않고 실패 메트릭이 증가하는지 확인 (인스턴스 간 수신 결과 동일)"
     - "ChatRepository.save() 실패 → 트랜잭션 롤백, broadcast 미발행 확인"
 
   unit_test_targets:
     - "ChatMessageUseCase: CLOSED 방 예외 분기 (Mock Service)"
-    - "ChatMessagePublisher: Redis 정상 시 publish 호출, 장애 시 fallback 전환 검증"
+    - "ChatMessagePublisher: Redis 정상 시 publish 호출, 장애 시 예외 미전파 + 실패 카운터 증가 검증"
     - "ChatRoomGetService.validateParticipant: 방 미존재 → 40602, 미참여 → 40604"
     - "WebSocketSessionStore.isSubscribed: 구독/미구독 상태 정확성 검증"
 
