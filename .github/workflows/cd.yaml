@@ -5,9 +5,6 @@ name: bangjjack CD 파이프라인
 #   dev  -> ECS 서비스 bangjjack-dev-backend
 # 배포: 이미지 ECR 푸시 -> 현재 태스크 정의에 새 이미지를 넣어 리비전 등록 -> 서비스 롤링 배포.
 #   새 태스크가 ALB 헬스 체크를 통과하지 못하면 ECS deployment circuit breaker 가 이전 리비전으로 롤백한다.
-# 단일 서버(one-<env>.pattie.cloud, 기존 EC2): ECS 와 같은 이미지를 SSM 으로 배포한다.
-#   평소 중지 상태라 running 일 때만 배포하고, 중지 상태면 건너뛴다
-#   (나중에 켜면 terraform/scripts/legacy-backend.sh <env> deploy <tag> 로 맞춘다).
 # AWS 인증은 GitHub OIDC (장기 액세스 키 없음). 브랜치별 IAM 역할은 자기 환경 서비스에만 배포 가능.
 #
 # 필요한 Repository variables (terraform/scripts/set-github-vars.sh 가 설정):
@@ -191,53 +188,3 @@ jobs:
             echo "- service: \`${ECS_CLUSTER}/${ECS_SERVICE}\`"
             echo "- task definition: \`${NEW_ARN##*/}\`"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: ${{ github.ref_name }} 단일 서버(EC2) 배포 (SSM, running 일 때만)
-        env:
-          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.DEPLOY_ENV }}-${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Project,Values=${PROJECT_TAG}" \
-                      "Name=tag:Env,Values=${DEPLOY_ENV}" \
-                      "Name=tag:Role,Values=backend" \
-                      "Name=instance-state-name,Values=running" \
-            --query 'Reservations[].Instances[].InstanceId' --output text)
-          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
-            echo "::notice::one-${DEPLOY_ENV} 단일 서버가 중지 상태라 배포를 건너뜀 (켠 뒤 legacy-backend.sh ${DEPLOY_ENV} deploy ${DEPLOY_ENV}-${GITHUB_SHA})"
-            echo "- one-${DEPLOY_ENV}: 중지 상태, 건너뜀" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "target instance: $INSTANCE_ID"
-
-          PARAMS=$(jq -nc --arg c "/usr/local/bin/${PROJECT_TAG}-deploy ${IMAGE}" '{commands: [$c]}')
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --comment "deploy one-${DEPLOY_ENV} ${GITHUB_SHA::7}" \
-            --timeout-seconds 900 \
-            --parameters "$PARAMS" \
-            --query Command.CommandId --output text)
-          echo "ssm command: $COMMAND_ID"
-
-          STATUS=Pending
-          for _ in $(seq 1 100); do
-            sleep 6
-            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
-            case "$STATUS" in
-              Pending|InProgress|Delayed) continue ;;
-              *) break ;;
-            esac
-          done
-
-          echo "::group::deploy output"
-          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-            --query StandardOutputContent --output text || true
-          echo "::endgroup::"
-
-          if [ "$STATUS" != "Success" ]; then
-            echo "::error::one-${DEPLOY_ENV} deploy ${STATUS} (서버에서 이전 이미지로 롤백을 시도함)"; exit 1
-          fi
-          echo "- one-${DEPLOY_ENV}: \`${INSTANCE_ID}\` 배포 완료" >> "$GITHUB_STEP_SUMMARY"
