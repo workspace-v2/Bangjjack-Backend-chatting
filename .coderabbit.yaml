@@ -1,0 +1,25 @@
+# CodeRabbit 리뷰 설정 (https://docs.coderabbit.ai/reference/configuration)
+language: ko-KR
+
+reviews:
+  profile: chill                 # 사소한 스타일 지적은 줄이고 동작/설계 위주로
+  request_changes_workflow: false
+  high_level_summary: true
+  path_filters:
+    - "!src/main/resources/db/migration/V1__baseline.sql"   # 운영 DB 덤프 기반 기준 스키마
+    - "!.claude/**"                                         # 기능 명세 문서
+  path_instructions:
+    - path: "src/main/java/**"
+      instructions: >
+        다중 서버(ECS 2태스크) + Redis Pub/Sub + MySQL 구조의 채팅 서비스다.
+        동시성(같은 채팅방 동시 쓰기), 트랜잭션 경계(@Transactional, AFTER_COMMIT 이벤트),
+        락 순서와 데드락 가능성, Redis/DB 장애 시 동작(예외 전파, 재시도, 유실·중복)을 중점적으로 리뷰한다.
+    - path: "src/main/resources/db/migration/**"
+      instructions: "운영 데이터가 있는 테이블에 대한 잠금 시간, 하위 호환(구 버전 코드와 공존), 롤백 가능성을 확인한다."
+    - path: "src/test/**"
+      instructions: "장애/경계 상황을 실제로 검증하는지, 검증 없이 통과하는 테스트가 없는지 확인한다."
+  auto_review:
+    enabled: true
+    base_branches:
+      - "dev"
+      - "main"
