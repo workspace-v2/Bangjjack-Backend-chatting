@@ -85,6 +85,20 @@ management:
           include: livenessState, ping   # 프로세스 생존 여부만 (외부 의존성 제외)
         readiness:
           include: readinessState, db    # 트래픽 받을 준비 상태 (모니터링 참고용)
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0} # 실험 환경: 전수 수집 (부하 측정 시 손실 메시지 추적)
+    export:
+      enabled: ${TRACING_EXPORT_ENABLED:true}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces} # 모니터링 인스턴스의 Tempo
+  otlp:
+    metrics:
+      export:
+        enabled: false # 메트릭은 Prometheus 수집 유지 (OTLP 메트릭 push 비활성화)
   metrics:
     tags:
       application: ${spring.application.name}

@@ -13,6 +13,8 @@ import com.project.bangjjack.global.common.exception.ApplicationException;
 import com.project.bangjjack.global.infrastructure.redis.WebSocketSessionRegistry;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
 import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -33,6 +35,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final WebSocketSessionStore sessionStore;
     private final WebSocketSessionRegistry sessionRegistry;
     private final ObjectMapper objectMapper;
+    private final ObservationRegistry observationRegistry;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
@@ -87,20 +90,20 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     sessionStore.unsubscribe(inbound.roomId(), session);
                     log.debug("[WS] 구독 해제 - userId={}, roomId={}", principal.getMemberId(), inbound.roomId());
                 }
-                case SEND -> {
+                case SEND -> observe("chat.message.send", principal.getMemberId(), inbound.roomId(), () -> {
                     log.debug("[WS] 메시지 송신 시도 - userId={}, roomId={}", principal.getMemberId(), inbound.roomId());
                     if (!sessionStore.isSubscribed(inbound.roomId(), session)) {
                         throw new NotSubscribedException();
                     }
                     chatMessageUseCase.sendMessage(principal.getMemberId(), inbound.roomId(), new SendChatMessageRequest(inbound.content()));
-                }
-                case READ -> {
+                });
+                case READ -> observe("chat.message.read", principal.getMemberId(), inbound.roomId(), () -> {
                     log.debug("[WS] 읽음 처리 시도 - userId={}, roomId={}, messageId={}", principal.getMemberId(), inbound.roomId(), inbound.messageId());
                     if (!sessionStore.isSubscribed(inbound.roomId(), session)) {
                         throw new NotSubscribedException();
                     }
                     chatMessageUseCase.markAsRead(principal.getMemberId(), inbound.roomId(), inbound.messageId());
-                }
+                });
                 default -> log.warn("[WS] 알 수 없는 메시지 타입 - type={}", inbound.type());
             }
         } catch (ApplicationException e) {
@@ -112,6 +115,17 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     principal.getMemberId(), e.getMessage(), e);
             sendError(session, WebSocketErrorResponse.from(ChatRoomErrorCode.WS_INTERNAL_ERROR));
         }
+    }
+
+    /**
+     * WebSocket 메시지는 HTTP 요청이 아니라 자동으로 트레이스가 시작되지 않으므로, 처리 구간(방 락·저장·커밋)을 직접 감싼다.
+     * 커밋 후 리스너도 이 구간 안에서 실행되어, Redis 발행까지 같은 트레이스로 이어진다.
+     */
+    private void observe(String name, Long userId, Long roomId, Runnable action) {
+        Observation.createNotStarted(name, observationRegistry)
+                .highCardinalityKeyValue("chat.room.id", String.valueOf(roomId))
+                .highCardinalityKeyValue("user.id", String.valueOf(userId))
+                .observe(action);
     }
 
     private void sendError(WebSocketSession session, WebSocketErrorResponse error) {
