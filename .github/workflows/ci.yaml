@@ -4,6 +4,11 @@ name: bangjjack CI 파이프라인
 on:
   pull_request:
     branches: [ "main", "dev" ]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - "**/*.rst"
+      - "**/*.adoc"
 
 permissions:
   contents: read

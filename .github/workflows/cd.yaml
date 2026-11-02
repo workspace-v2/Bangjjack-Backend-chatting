@@ -12,6 +12,11 @@ name: bangjjack CD 파이프라인
 on:
   push:
     branches: [ "main", "dev" ]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - "**/*.rst"
+      - "**/*.adoc"
   workflow_dispatch:
 
 permissions:
