@@ -91,6 +91,8 @@ management:
     export:
       enabled: ${TRACING_EXPORT_ENABLED:true}
   opentelemetry:
+    resource-attributes:
+      "[deployment.environment]": ${APP_ENV:dev} # main/dev 가 같은 Tempo 로 보내므로 트레이스에 환경을 남긴다
     tracing:
       export:
         otlp:
