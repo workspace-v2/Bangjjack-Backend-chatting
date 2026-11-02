@@ -4,6 +4,7 @@ import com.project.bangjjack.domain.chat.application.dto.request.SendChatMessage
 import com.project.bangjjack.domain.chat.application.dto.response.ChatMessageBroadcast;
 import com.project.bangjjack.domain.chat.application.dto.response.ChatMessagePageResponse;
 import com.project.bangjjack.domain.chat.application.dto.response.ChatMessageResponse;
+import com.project.bangjjack.domain.chat.application.dto.response.ChatMessageSyncResponse;
 import com.project.bangjjack.domain.chat.application.event.ChatMessageSentEvent;
 import com.project.bangjjack.domain.chat.application.event.ReadReceiptEvent;
 import com.project.bangjjack.domain.chat.application.exception.InvalidMessageContentException;
@@ -93,6 +94,28 @@ public class ChatMessageUseCase {
         Long partnerLastReadMessageId = chatRoomGetService.findPartnerLastReadMessageId(roomId, currentUserId);
 
         return ChatMessagePageResponse.of(messages, nextCursor, hasNext, partnerLastReadMessageId);
+    }
+
+    /**
+     * 실시간 수신에서 빠진 메시지를 seq 기준으로 돌려준다 (재연결, seq gap, 서버의 재동기화 신호 시 호출).
+     * 읽음 처리는 하지 않는다 (클라이언트가 화면에 표시한 뒤 READ 로 처리).
+     * 방의 last_seq 를 먼저 읽고 그 이하만 조회한다. 같은 트랜잭션 스냅샷이라 seq 발급과 메시지 저장이
+     * 한 트랜잭션으로 커밋되는 이상 last_seq 이하 메시지가 빠지는 일은 없다.
+     */
+    public ChatMessageSyncResponse syncMessages(Long currentUserId, Long roomId, long afterSeq, int size) {
+        ChatRoomParticipant participant = chatRoomGetService.getActiveParticipant(roomId, currentUserId);
+        long latestSeq = chatRoomGetService.getLastSeq(roomId);
+
+        List<Chat> fetched = chatMessageGetService.getMessagesForSync(
+                roomId, afterSeq, latestSeq, participant.getVisibleFromMessageId(), size);
+        boolean hasNext = fetched.size() > size;
+        List<Chat> content = hasNext ? fetched.subList(0, size) : fetched;
+        long syncedSeq = hasNext ? content.get(content.size() - 1).getSeq() : Math.max(afterSeq, latestSeq);
+
+        List<ChatMessageResponse> messages = content.stream()
+                .map(ChatMessageResponse::from)
+                .toList();
+        return ChatMessageSyncResponse.of(messages, hasNext, syncedSeq);
     }
 
     private void markAsReadAndPublish(Long roomId, Long userId, Long messageId) {

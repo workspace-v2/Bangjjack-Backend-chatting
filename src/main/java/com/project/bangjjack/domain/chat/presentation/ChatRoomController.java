@@ -3,6 +3,7 @@ package com.project.bangjjack.domain.chat.presentation;
 import com.project.bangjjack.domain.chat.application.dto.request.CreateChatRoomRequest;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoomCategory;
 import com.project.bangjjack.domain.chat.application.dto.response.ChatMessagePageResponse;
+import com.project.bangjjack.domain.chat.application.dto.response.ChatMessageSyncResponse;
 import com.project.bangjjack.domain.chat.application.dto.response.ChatRoomListResponse;
 import com.project.bangjjack.domain.chat.application.dto.response.ChatRoomResponse;
 import com.project.bangjjack.domain.chat.application.usecase.ChatMessageUseCase;
@@ -82,5 +83,22 @@ public class ChatRoomController {
             @RequestParam(defaultValue = "30") @Min(1) @Max(100) int size) {
         ChatMessagePageResponse response = chatMessageUseCase.getMessages(currentMemberId, roomId, cursor, size);
         return CommonResponse.success(ChatRoomResponseCode.CHAT_ROOM_MESSAGES_FOUND, response);
+    }
+
+    @Operation(
+            summary = "채팅 메시지 동기화",
+            description = "afterSeq(마지막으로 받은 seq) 이후 메시지를 seq 오름차순으로 반환합니다. "
+                    + "WebSocket 재연결, 수신 seq 건너뜀(gap), SYNC_REQUIRED 수신 시 호출합니다. \n"
+                    + "hasNext 가 true 면 응답의 syncedSeq 를 afterSeq 로 다시 호출하고, 끝나면 syncedSeq 를 마지막 수신 seq 로 기록합니다. "
+                    + "읽음 처리는 하지 않습니다."
+    )
+    @GetMapping("/{roomId}/messages/sync")
+    public CommonResponse<ChatMessageSyncResponse> syncMessages(
+            @CurrentMemberId Long currentMemberId,
+            @PathVariable Long roomId,
+            @RequestParam @Min(0) long afterSeq,
+            @RequestParam(defaultValue = "100") @Min(1) @Max(200) int size) {
+        ChatMessageSyncResponse response = chatMessageUseCase.syncMessages(currentMemberId, roomId, afterSeq, size);
+        return CommonResponse.success(ChatRoomResponseCode.CHAT_ROOM_MESSAGES_SYNCED, response);
     }
 }
