@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # CodeRabbit 리뷰 설정 (https://docs.coderabbit.ai/reference/configuration)
 language: ko-KR
 
@@ -5,9 +6,20 @@ reviews:
   profile: chill                 # 사소한 스타일 지적은 줄이고 동작/설계 위주로
   request_changes_workflow: false
   high_level_summary: true
+  # 핵심 코드 리뷰와 요약은 유지하고 부가 생성·탐색 작업은 생략한다.
+  sequence_diagrams: false
+  changed_files_summary: false
+  estimate_code_review_effort: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
   path_filters:
     - "!src/main/resources/db/migration/V1__baseline.sql"   # 운영 DB 덤프 기반 기준 스키마
     - "!.claude/**"                                         # 기능 명세 문서
+    - "!build/**"
+    - "!.gradle/**"
+    - "!gradle/wrapper/gradle-wrapper.jar"                    # 생성된 바이너리
   path_instructions:
     - path: "src/main/java/**"
       instructions: >
@@ -20,6 +32,8 @@ reviews:
       instructions: "장애/경계 상황을 실제로 검증하는지, 검증 없이 통과하는 테스트가 없는지 확인한다."
   auto_review:
     enabled: true
+    auto_incremental_review: true  # 후속 push에도 증분 리뷰 유지
+    drafts: false                  # 작성 중인 PR은 준비 완료 후 리뷰
     base_branches:
       - "dev"
     ignore_title_keywords:

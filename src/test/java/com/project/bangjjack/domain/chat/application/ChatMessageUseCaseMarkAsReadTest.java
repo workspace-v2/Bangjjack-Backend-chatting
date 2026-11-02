@@ -8,6 +8,7 @@ import com.project.bangjjack.domain.chat.domain.entity.ChatRoomParticipant;
 import com.project.bangjjack.domain.chat.domain.service.ChatMessageGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatSaveService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -33,6 +34,8 @@ class ChatMessageUseCaseMarkAsReadTest {
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private Validator validator;
 
+    @Mock private ChatStateUpdateService chatStateUpdateService;
+
     @InjectMocks
     private ChatMessageUseCase chatMessageUseCase;
 
@@ -53,7 +56,7 @@ class ChatMessageUseCaseMarkAsReadTest {
             Long messageId = 100L;
             ChatRoomParticipant participant = createParticipant(userId);
 
-            given(chatRoomGetService.getActiveParticipant(roomId, userId)).willReturn(participant);
+            given(chatStateUpdateService.markAsRead(roomId, userId, messageId)).willReturn(true);
 
             // when
             chatMessageUseCase.markAsRead(userId, roomId, messageId);
@@ -72,7 +75,7 @@ class ChatMessageUseCaseMarkAsReadTest {
             ChatRoomParticipant participant = createParticipant(userId);
             participant.markAsRead(messageId); // 미리 읽음 처리
 
-            given(chatRoomGetService.getActiveParticipant(roomId, userId)).willReturn(participant);
+            given(chatStateUpdateService.markAsRead(roomId, userId, messageId)).willReturn(false);
 
             // when
             chatMessageUseCase.markAsRead(userId, roomId, messageId);
@@ -89,7 +92,7 @@ class ChatMessageUseCaseMarkAsReadTest {
             Long roomId = 10L;
 
             doThrow(new NotChatParticipantException())
-                    .when(chatRoomGetService).getActiveParticipant(roomId, outsiderId);
+                    .when(chatStateUpdateService).markAsRead(roomId, outsiderId, 100L);
 
             // when & then
             org.assertj.core.api.Assertions.assertThatThrownBy(

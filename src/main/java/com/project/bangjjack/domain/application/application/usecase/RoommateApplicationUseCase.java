@@ -38,6 +38,7 @@ import com.project.bangjjack.domain.roommategroup.domain.service.RoommateGroupMe
 import com.project.bangjjack.domain.roommategroup.domain.service.RoommateGroupMemberGetService;
 import com.project.bangjjack.domain.user.domain.entity.User;
 import com.project.bangjjack.domain.user.domain.service.UserGetService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,7 @@ public class RoommateApplicationUseCase {
     private final ChatRoomGetService chatRoomGetService;
     private final ChatRoomCreateService chatRoomCreateService;
     private final ChatSaveService chatSaveService;
+    private final ChatStateUpdateService chatStateUpdateService;
     private final RoommateGroupGetService roommateGroupGetService;
     private final RoommateGroupMemberGetService roommateGroupMemberGetService;
     private final RoommateGroupMemberCreateService roommateGroupMemberCreateService;
@@ -114,7 +116,7 @@ public class RoommateApplicationUseCase {
         );
 
         Chat chat = chatSaveService.save(userId, chatRoom, APPLICATION_CHAT_MESSAGE, MessageType.APPLICATION_SENT, saved.getId());
-        chatRoom.updateCategory(ChatRoomCategory.APPLICATION);
+        chatStateUpdateService.updateCategory(chatRoom.getId(), ChatRoomCategory.APPLICATION);
         eventPublisher.publishEvent(new ChatMessageSentEvent(
                 chatRoom.getId(), ChatMessageBroadcast.from(chat, chatRoom.getId())));
 
@@ -178,7 +180,7 @@ public class RoommateApplicationUseCase {
         String content = accepted ? APPLICATION_ACCEPTED_MESSAGE : APPLICATION_REJECTED_MESSAGE;
         MessageType messageType = accepted ? MessageType.APPLICATION_ACCEPTED : MessageType.APPLICATION_REJECTED;
         Chat chat = chatSaveService.save(authorId, chatRoom, content, messageType, applicationId);
-        chatRoom.updateCategory(ChatRoomCategory.GENERAL);
+        chatStateUpdateService.updateCategory(chatRoom.getId(), ChatRoomCategory.GENERAL);
         eventPublisher.publishEvent(new ChatMessageSentEvent(
                 chatRoom.getId(), ChatMessageBroadcast.from(chat, chatRoom.getId())));
 
@@ -208,7 +210,7 @@ public class RoommateApplicationUseCase {
 
         Chat chat = chatSaveService.save(
                 applicantId, chatRoom, APPLICATION_CANCELED_MESSAGE, MessageType.APPLICATION_CANCELED, applicationId);
-        chatRoom.updateCategory(ChatRoomCategory.GENERAL);
+        chatStateUpdateService.updateCategory(chatRoom.getId(), ChatRoomCategory.GENERAL);
         eventPublisher.publishEvent(new ChatMessageSentEvent(
                 chatRoom.getId(), ChatMessageBroadcast.from(chat, chatRoom.getId())));
     }
