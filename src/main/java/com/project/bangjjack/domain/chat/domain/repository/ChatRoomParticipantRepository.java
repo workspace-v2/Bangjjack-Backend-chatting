@@ -76,14 +76,4 @@ public interface ChatRoomParticipantRepository extends JpaRepository<ChatRoomPar
               AND EXISTS (SELECT 1 FROM chat target WHERE target.id = :messageId AND target.room_id = :roomId AND target.deleted = false)
             """, nativeQuery = true)
     int markAsRead(@Param("roomId") Long roomId, @Param("userId") Long userId, @Param("messageId") Long messageId);
-
-    /**
-     * 나간(LEFT) 참여자를 쓰기 락으로 조회한다 (SELECT ... FOR UPDATE, 현재 읽기).
-     * 일반 SELECT 는 REPEATABLE READ 에서 트랜잭션의 첫 읽기 시점 스냅샷을 보므로, 채팅방 락을 기다린 뒤에도
-     * 앞선 트랜잭션이 커밋한 재입장·unread 변경을 못 볼 수 있다. 락 조회는 항상 최신 커밋 값을 읽는다.
-     * 반드시 채팅방 락(ChatRoomRepository.findByIdForUpdate) 이후에 호출해 락 순서(chat_room -> participant)를 지킨다.
-     */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT p FROM ChatRoomParticipant p WHERE p.chatRoom.id = :roomId AND p.status = com.project.bangjjack.domain.chat.domain.entity.ParticipantStatus.LEFT AND p.deleted = false")
-    List<ChatRoomParticipant> findLeftByRoomIdForUpdate(@Param("roomId") Long roomId);
 }
