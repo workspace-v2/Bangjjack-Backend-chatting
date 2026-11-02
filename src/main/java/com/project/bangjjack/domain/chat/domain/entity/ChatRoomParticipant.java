@@ -6,8 +6,10 @@ import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.DynamicUpdate;
 
 @Entity
+@DynamicUpdate // 변경된 컬럼만 UPDATE: 오래된 엔티티의 다른 컬럼 값이 동시 변경을 덮어쓰지 않게 한다
 @Table(
     name = "chat_room_participant",
     uniqueConstraints = @UniqueConstraint(name = "UQ_participant_room_user", columnNames = {"room_id", "user_id"})
