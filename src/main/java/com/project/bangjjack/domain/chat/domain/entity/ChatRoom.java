@@ -40,8 +40,12 @@ public class ChatRoom extends BaseEntity {
     @Column(nullable = false, length = 15)
     private ChatRoomCategory category;
 
+    /** 이 방에서 마지막으로 발급한 메시지 seq. 메시지 저장 시 방 락 안에서만 증가한다. */
+    @Column(name = "last_seq", nullable = false)
+    private long lastSeq;
+
     public static ChatRoom createDirect(Long createdBy, String directRoomKey) {
-        return new ChatRoom(createdBy, RoomType.DIRECT, RoomStatus.OPEN, directRoomKey, null, ChatRoomCategory.GENERAL);
+        return new ChatRoom(createdBy, RoomType.DIRECT, RoomStatus.OPEN, directRoomKey, null, ChatRoomCategory.GENERAL, 0L);
     }
 
     public static String generateDirectKey(Long userId1, Long userId2) {

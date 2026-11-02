@@ -45,7 +45,7 @@ class ChatSaveServiceTest {
     private ChatSaveService chatSaveService;
 
     @Test
-    @DisplayName("메시지 저장은 채팅방 쓰기 락을 가장 먼저 잡고, 그 다음 INSERT, unread 갱신 순서로 실행한다 (데드락 방지 락 순서)")
+    @DisplayName("메시지 저장은 채팅방 쓰기 락을 가장 먼저 잡고, 그 다음 seq 발급, INSERT, unread 갱신 순서로 실행한다 (데드락 방지 락 순서)")
     void save_locksRoomFirst() {
         ChatRoom chatRoom = mock(ChatRoom.class);
         given(chatRoom.getId()).willReturn(ROOM_ID);
@@ -59,6 +59,7 @@ class ChatSaveServiceTest {
         assertThat(result).isSameAs(saved);
         InOrder order = inOrder(chatStateUpdateService, chatRoomRepository, chatRepository, chatRoomParticipantRepository);
         order.verify(chatStateUpdateService).lockRoom(ROOM_ID);
+        order.verify(chatStateUpdateService).nextSeq(ROOM_ID);
         order.verify(chatRepository).save(any(Chat.class));
         order.verify(chatRoomRepository).updateLastMessageAt(ROOM_ID, createdAt);
         order.verify(chatRoomParticipantRepository).incrementUnreadCountExcludingSender(ROOM_ID, SENDER_ID);
@@ -76,8 +77,22 @@ class ChatSaveServiceTest {
 
         InOrder order = inOrder(chatStateUpdateService, chatRepository, chatRoomRepository, chatRoomParticipantRepository);
         order.verify(chatStateUpdateService).prepareUserMessage(ROOM_ID, SENDER_ID);
+        order.verify(chatStateUpdateService).nextSeq(ROOM_ID);
         order.verify(chatRepository).save(any(Chat.class));
         order.verify(chatRoomRepository).updateLastMessageAt(ROOM_ID, null);
         order.verify(chatRoomParticipantRepository).incrementUnreadCountExcludingSender(ROOM_ID, SENDER_ID);
+    }
+
+    @Test
+    @DisplayName("방 락 안에서 발급한 seq 를 메시지에 저장한다")
+    void save_assignsSeqFromRoom() {
+        ChatRoom room = mock(ChatRoom.class);
+        given(room.getId()).willReturn(ROOM_ID);
+        given(chatStateUpdateService.nextSeq(ROOM_ID)).willReturn(7L);
+        given(chatRepository.save(any(Chat.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        Chat saved = chatSaveService.save(SENDER_ID, room, "안녕하세요", MessageType.USER);
+
+        assertThat(saved.getSeq()).isEqualTo(7L);
     }
 }

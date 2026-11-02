@@ -217,6 +217,39 @@ class ChatStateMysqlIntegrationTest {
         });
     }
 
+    @Test
+    void concurrentSendsGetGaplessSeqInCommitOrder() throws Exception {
+        int senders = 8;
+        int perSender = 5;
+        CyclicBarrier start = new CyclicBarrier(senders);
+        try (var workers = Executors.newFixedThreadPool(senders)) {
+            var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int i = 0; i < senders; i++) {
+                long senderId = i % 2 == 0 ? 1L : 2L;
+                futures.add(workers.submit(() -> {
+                    start.await(10, TimeUnit.SECONDS);
+                    for (int n = 0; n < perSender; n++) {
+                        transaction.executeWithoutResult(status ->
+                                saves.saveWithRejoin(senderId, rooms.findById(roomId).orElseThrow(), "동시 메시지"));
+                    }
+                    return null;
+                }));
+            }
+            for (var future : futures) {
+                future.get(20, TimeUnit.SECONDS);
+            }
+        }
+        transaction.executeWithoutResult(status -> {
+            var saved = chats.findAll().stream()
+                    .sorted(java.util.Comparator.comparing(Chat::getId))
+                    .toList();
+            int total = senders * perSender;
+            assertThat(saved).extracting(Chat::getSeq)
+                    .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, total).boxed().toList());
+            assertThat(rooms.findLastSeq(roomId)).contains((long) total);
+        });
+    }
+
     private Long send() {
         return transaction.execute(status -> {
             ChatRoom room = rooms.findById(roomId).orElseThrow();

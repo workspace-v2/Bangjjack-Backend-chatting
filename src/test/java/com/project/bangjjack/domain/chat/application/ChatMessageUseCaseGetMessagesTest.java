@@ -62,7 +62,7 @@ class ChatMessageUseCaseGetMessagesTest {
 
     private Chat createChat() {
         ChatRoom chatRoom = ChatRoom.createDirect(1L, "DM_1_2");
-        Chat chat = Chat.create(1L, chatRoom, "테스트 메시지", MessageType.USER);
+        Chat chat = Chat.create(1L, chatRoom, "테스트 메시지", MessageType.USER, 1L);
         ReflectionTestUtils.setField(chat, "id", idSequence.getAndIncrement());
         return chat;
     }

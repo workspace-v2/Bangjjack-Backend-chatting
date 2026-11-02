@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 
 public record ChatMessageResponse(
         Long messageId,
+        Long seq,
         Long senderId,
         String content,
         MessageType messageType,
@@ -16,6 +17,7 @@ public record ChatMessageResponse(
     public static ChatMessageResponse from(Chat chat) {
         return new ChatMessageResponse(
                 chat.getId(),
+                chat.getSeq(),
                 chat.getSenderId(),
                 chat.getContent(),
                 chat.getMessageType(),

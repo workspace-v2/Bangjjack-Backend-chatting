@@ -86,7 +86,7 @@ class ChatMessagePublisherTest {
 
     private ChatMessageBroadcast broadcast() {
         return new ChatMessageBroadcast(
-                WebSocketBroadcastType.CHAT_MESSAGE, 10L, ROOM_ID, 2L, "안녕하세요",
+                WebSocketBroadcastType.CHAT_MESSAGE, 10L, ROOM_ID, 1L, 2L, "안녕하세요",
                 MessageType.USER, null, LocalDateTime.of(2026, 10, 31, 12, 0));
     }
 }

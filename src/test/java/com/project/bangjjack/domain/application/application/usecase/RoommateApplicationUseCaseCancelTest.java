@@ -135,7 +135,8 @@ class RoommateApplicationUseCaseCancelTest {
                             invocation.getArgument(1),
                             invocation.getArgument(2),
                             MessageType.APPLICATION_CANCELED,
-                            APPLICATION_ID);
+                            APPLICATION_ID,
+                            1L);
                     ReflectionTestUtils.setField(chat, "id", CHAT_ID);
                     return chat;
                 });
