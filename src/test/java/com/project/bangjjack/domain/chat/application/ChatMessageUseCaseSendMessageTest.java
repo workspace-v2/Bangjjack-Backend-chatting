@@ -4,10 +4,10 @@ import com.project.bangjjack.domain.chat.application.dto.request.SendChatMessage
 import com.project.bangjjack.domain.chat.application.usecase.ChatMessageUseCase;
 import com.project.bangjjack.domain.chat.domain.entity.Chat;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoom;
-import com.project.bangjjack.domain.chat.domain.entity.MessageType;
 import com.project.bangjjack.domain.chat.domain.service.ChatMessageGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatSaveService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,7 +18,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
-import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -38,23 +37,23 @@ class ChatMessageUseCaseSendMessageTest {
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private Validator validator;
 
+    @Mock private ChatStateUpdateService chatStateUpdateService;
+
     @InjectMocks
     private ChatMessageUseCase chatMessageUseCase;
 
     @Test
-    @DisplayName("채팅방 락을 먼저 잡은 뒤 재입장 대상을 락 조회로 읽고, 그 다음 메시지를 저장한다")
-    void sendMessage_locksRoomBeforeReadingLeftParticipants() {
+    @DisplayName("재입장을 포함한 메시지 저장 작업을 서비스에 위임한다")
+    void sendMessage_delegatesSaveWithRejoin() {
         ChatRoom chatRoom = mock(ChatRoom.class);
         given(chatRoomGetService.getByIdAndValidateParticipant(ROOM_ID, SENDER_ID)).willReturn(chatRoom);
-        given(chatRoomGetService.findLeftParticipantsByRoomIdForUpdate(ROOM_ID, SENDER_ID)).willReturn(List.of());
-        given(chatSaveService.save(eq(SENDER_ID), eq(chatRoom), eq("안녕하세요"), eq(MessageType.USER)))
+        given(chatSaveService.saveWithRejoin(eq(SENDER_ID), eq(chatRoom), eq("안녕하세요")))
                 .willReturn(mock(Chat.class));
 
         chatMessageUseCase.sendMessage(SENDER_ID, ROOM_ID, new SendChatMessageRequest("안녕하세요"));
 
         InOrder order = inOrder(chatSaveService, chatRoomGetService);
-        order.verify(chatSaveService).lockRoom(ROOM_ID);
-        order.verify(chatRoomGetService).findLeftParticipantsByRoomIdForUpdate(ROOM_ID, SENDER_ID);
-        order.verify(chatSaveService).save(SENDER_ID, chatRoom, "안녕하세요", MessageType.USER);
+        order.verify(chatRoomGetService).getByIdAndValidateParticipant(ROOM_ID, SENDER_ID);
+        order.verify(chatSaveService).saveWithRejoin(SENDER_ID, chatRoom, "안녕하세요");
     }
 }

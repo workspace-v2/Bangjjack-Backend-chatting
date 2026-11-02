@@ -12,6 +12,7 @@ import com.project.bangjjack.domain.chat.domain.entity.MessageType;
 import com.project.bangjjack.domain.chat.domain.service.ChatMessageGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatSaveService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,8 @@ class ChatMessageUseCaseGetMessagesTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher; // ChatMessageUseCase 의존성 주입에 필요
+
+    @Mock private ChatStateUpdateService chatStateUpdateService;
 
     @InjectMocks
     private ChatMessageUseCase chatMessageUseCase;
@@ -192,6 +195,7 @@ class ChatMessageUseCaseGetMessagesTest {
 
             given(chatRoomGetService.getActiveParticipant(roomId, currentUserId)).willReturn(myParticipant);
             given(chatMessageGetService.getMessages(roomId, null, null, 30)).willReturn(List.of(chat));
+            given(chatStateUpdateService.markAsRead(roomId, currentUserId, chat.getId())).willReturn(true);
             given(chatRoomGetService.findPartnerLastReadMessageId(roomId, currentUserId)).willReturn(chat.getId());
 
             // when
@@ -234,7 +238,7 @@ class ChatMessageUseCaseGetMessagesTest {
             chatMessageUseCase.getMessages(1L, roomId, null, 30);
 
             // then
-            assertThat(participant.getLastReadMessageId()).isEqualTo(newest.getId());
+            then(chatStateUpdateService).should().markAsRead(roomId, 1L, newest.getId());
         }
     }
 
@@ -253,6 +257,7 @@ class ChatMessageUseCaseGetMessagesTest {
 
             given(chatRoomGetService.getActiveParticipant(roomId, currentUserId)).willReturn(participant);
             given(chatMessageGetService.getMessages(roomId, null, null, 30)).willReturn(List.of(chat));
+            given(chatStateUpdateService.markAsRead(roomId, currentUserId, chat.getId())).willReturn(true);
 
             // when
             chatMessageUseCase.getMessages(currentUserId, roomId, null, 30);
@@ -288,6 +293,7 @@ class ChatMessageUseCaseGetMessagesTest {
 
             given(chatRoomGetService.getActiveParticipant(roomId, currentUserId)).willReturn(participant);
             given(chatMessageGetService.getMessages(roomId, null, null, 30)).willReturn(List.of(chat));
+            given(chatStateUpdateService.markAsRead(roomId, currentUserId, chat.getId())).willReturn(false);
 
             // when
             chatMessageUseCase.getMessages(currentUserId, roomId, null, 30);
@@ -307,6 +313,7 @@ class ChatMessageUseCaseGetMessagesTest {
 
             given(chatRoomGetService.getActiveParticipant(roomId, currentUserId)).willReturn(participant);
             given(chatMessageGetService.getMessages(roomId, null, null, 30)).willReturn(List.of(chat));
+            given(chatStateUpdateService.markAsRead(roomId, currentUserId, chat.getId())).willReturn(true);
 
             // when
             chatMessageUseCase.getMessages(currentUserId, roomId, null, 30);

@@ -10,10 +10,10 @@ import com.project.bangjjack.domain.chat.application.exception.InvalidMessageCon
 import com.project.bangjjack.domain.chat.domain.entity.Chat;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoom;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoomParticipant;
-import com.project.bangjjack.domain.chat.domain.entity.MessageType;
 import com.project.bangjjack.domain.chat.domain.service.ChatMessageGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatSaveService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +33,7 @@ public class ChatMessageUseCase {
 
     private final ChatRoomGetService chatRoomGetService;
     private final ChatSaveService chatSaveService;
+    private final ChatStateUpdateService chatStateUpdateService;
     private final ChatMessageGetService chatMessageGetService;
     private final ApplicationEventPublisher eventPublisher;
     private final Validator validator;
@@ -52,15 +53,7 @@ public class ChatMessageUseCase {
 
         ChatRoom chatRoom = chatRoomGetService.getByIdAndValidateParticipant(roomId, senderId);
 
-        // 채팅방 락을 먼저 잡고(ChatSaveService 락 순서: chat_room -> participant) 재입장 대상을 락 조회로 읽는다.
-        // - 락 전에 조회하면 같은 방 동시 전송이 같은 LEFT 참여자를 각자 읽고, 나중 트랜잭션이 오래된 엔티티로
-        //   앞선 트랜잭션의 unread 증가분을 덮어쓸 수 있다.
-        // - 락 뒤라도 일반 SELECT 는 REPEATABLE READ 스냅샷을 읽으므로, 최신 값을 보장하는 락 조회(FOR UPDATE)를 쓴다.
-        chatSaveService.lockRoom(roomId);
-        chatRoomGetService.findLeftParticipantsByRoomIdForUpdate(roomId, senderId)
-                .forEach(ChatRoomParticipant::rejoin);
-
-        Chat savedChat = chatSaveService.save(senderId, chatRoom, request.content(), MessageType.USER);
+        Chat savedChat = chatSaveService.saveWithRejoin(senderId, chatRoom, request.content());
         log.debug("[채팅 송신] DB 저장 완료 - messageId={}", savedChat.getId());
 
         ChatMessageBroadcast broadcast = ChatMessageBroadcast.from(savedChat, roomId);
@@ -70,12 +63,7 @@ public class ChatMessageUseCase {
 
     @Transactional
     public void markAsRead(Long userId, Long roomId, Long messageId) {
-        // messageId가 해당 roomId 소속인지 별도 검증하지 않음.
-        // 호출자는 이미 인증 + 참여자 검증을 통과한 유저이며, 잘못된 messageId를 보내도
-        // 본인의 lastReadMessageId만 오염되고 다음 정상 READ에서 자연 복구됨.
-        // 매 호출마다 DB 조회를 추가하는 비용 대비 실질적 위협이 낮아 의도적으로 생략.
-        ChatRoomParticipant participant = chatRoomGetService.getActiveParticipant(roomId, userId);
-        markAsReadAndPublish(participant, roomId, userId, messageId);
+        markAsReadAndPublish(roomId, userId, messageId);
     }
 
     @Transactional
@@ -88,7 +76,7 @@ public class ChatMessageUseCase {
         List<Chat> content = hasNext ? fetched.subList(0, size) : fetched;
 
         if (!content.isEmpty()) {
-            markAsReadAndPublish(participant, roomId, currentUserId, content.get(0).getId());
+            markAsReadAndPublish(roomId, currentUserId, content.get(0).getId());
         }
         Long nextCursor = hasNext ? content.get(content.size() - 1).getId() : null;
 
@@ -101,11 +89,8 @@ public class ChatMessageUseCase {
         return ChatMessagePageResponse.of(messages, nextCursor, hasNext, partnerLastReadMessageId);
     }
 
-    private void markAsReadAndPublish(ChatRoomParticipant participant, Long roomId, Long userId, Long messageId) {
-        // 동시 READ 요청 시 두 트랜잭션이 모두 true를 반환해 이벤트가 2회 발행될 수 있음.
-        // 읽음 처리는 최종 상태가 동일하므로 낙관적 락 없이 허용하며,
-        // 클라이언트에서 동일 {readerId, messageId} 수신 시 중복 무시로 대응.
-        if (participant.markAsRead(messageId)) {
+    private void markAsReadAndPublish(Long roomId, Long userId, Long messageId) {
+        if (chatStateUpdateService.markAsRead(roomId, userId, messageId)) {
             eventPublisher.publishEvent(new ReadReceiptEvent(roomId, userId, messageId));
         }
     }
