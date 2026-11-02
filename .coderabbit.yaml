@@ -20,6 +20,10 @@ reviews:
   path_filters:
     - "!src/main/resources/db/migration/V1__baseline.sql"   # 운영 DB 덤프 기반 기준 스키마
     - "!.claude/**"                                         # 기능 명세 문서
+    - "!**/*.md"
+    - "!**/*.mdx"
+    - "!**/*.rst"
+    - "!**/*.adoc"
     - "!build/**"
     - "!.gradle/**"
     - "!gradle/wrapper/gradle-wrapper.jar"                    # 생성된 바이너리
