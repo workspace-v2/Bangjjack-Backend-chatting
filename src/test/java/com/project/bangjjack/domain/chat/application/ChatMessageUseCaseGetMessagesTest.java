@@ -17,6 +17,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -34,6 +36,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class ChatMessageUseCaseGetMessagesTest {
@@ -206,7 +209,7 @@ class ChatMessageUseCaseGetMessagesTest {
         }
 
         @Test
-        @DisplayName("메시지가 없으면 lastReadMessageId가 변경되지 않는다")
+        @DisplayName("메시지가 없으면 상태 변경 서비스를 호출하지 않는다")
         void 메시지가_없으면_읽음_처리가_수행되지_않는다() {
             // given
             Long roomId = 10L;
@@ -219,7 +222,7 @@ class ChatMessageUseCaseGetMessagesTest {
             chatMessageUseCase.getMessages(1L, roomId, null, 30);
 
             // then
-            assertThat(participant.getLastReadMessageId()).isNull();
+            verifyNoInteractions(chatStateUpdateService);
         }
 
         @Test
@@ -281,24 +284,44 @@ class ChatMessageUseCaseGetMessagesTest {
             then(eventPublisher).should(never()).publishEvent(any(ReadReceiptEvent.class));
         }
 
-        @Test
-        @DisplayName("이미 읽은 메시지 ID로 조회하면 ReadReceiptEvent가 발행되지 않는다")
-        void 이미_읽은_메시지면_ReadReceiptEvent_미발행() {
+        @ParameterizedTest
+        @ValueSource(longs = {100L, 101L})
+        @DisplayName("읽음 커서가 페이지 최신 ID 이상이면 상태 변경 서비스와 이벤트를 호출하지 않는다")
+        void 이미_읽은_메시지면_상태_변경_서비스_미호출(long lastReadId) {
             // given
             Long currentUserId = 1L;
             Long roomId = 10L;
             ChatRoomParticipant participant = createParticipant(currentUserId);
             Chat chat = createChat();
-            participant.markAsRead(chat.getId()); // 미리 읽음 처리
+            ReflectionTestUtils.setField(chat, "id", 100L);
+            participant.markAsRead(lastReadId);
 
             given(chatRoomGetService.getActiveParticipant(roomId, currentUserId)).willReturn(participant);
             given(chatMessageGetService.getMessages(roomId, null, null, 30)).willReturn(List.of(chat));
-            given(chatStateUpdateService.markAsRead(roomId, currentUserId, chat.getId())).willReturn(false);
 
             // when
             chatMessageUseCase.getMessages(currentUserId, roomId, null, 30);
 
             // then
+            verifyNoInteractions(chatStateUpdateService);
+            then(eventPublisher).should(never()).publishEvent(any(ReadReceiptEvent.class));
+        }
+
+        @Test
+        @DisplayName("조회한 커서가 작으면 상태 변경 서비스를 호출하고 DB에서 이미 처리된 READ는 이벤트를 발행하지 않는다")
+        void 오래된_커서는_서비스에서_최종_판단한다() {
+            Long roomId = 10L;
+            ChatRoomParticipant participant = createParticipant(1L);
+            participant.markAsRead(99L);
+            Chat chat = createChat();
+            ReflectionTestUtils.setField(chat, "id", 100L);
+            given(chatRoomGetService.getActiveParticipant(roomId, 1L)).willReturn(participant);
+            given(chatMessageGetService.getMessages(roomId, null, null, 30)).willReturn(List.of(chat));
+            given(chatStateUpdateService.markAsRead(roomId, 1L, 100L)).willReturn(false);
+
+            chatMessageUseCase.getMessages(1L, roomId, null, 30);
+
+            then(chatStateUpdateService).should().markAsRead(roomId, 1L, 100L);
             then(eventPublisher).should(never()).publishEvent(any(ReadReceiptEvent.class));
         }
 

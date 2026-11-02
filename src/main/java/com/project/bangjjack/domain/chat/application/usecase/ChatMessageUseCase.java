@@ -76,7 +76,13 @@ public class ChatMessageUseCase {
         List<Chat> content = hasNext ? fetched.subList(0, size) : fetched;
 
         if (!content.isEmpty()) {
-            markAsReadAndPublish(roomId, currentUserId, content.get(0).getId());
+            Long newestId = content.get(0).getId();
+            Long lastReadId = participant.getLastReadMessageId();
+            // 커서는 단조 증가하므로 이미 읽은 페이지는 방 락 없이 건너뛴다.
+            // 스냅샷이 오래돼 커서가 작게 보이면 기존 락과 조건부 UPDATE가 최종 판단한다.
+            if (lastReadId == null || lastReadId < newestId) {
+                markAsReadAndPublish(roomId, currentUserId, newestId);
+            }
         }
         Long nextCursor = hasNext ? content.get(content.size() - 1).getId() : null;
 
