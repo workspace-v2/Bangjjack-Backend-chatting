@@ -1,6 +1,7 @@
 package com.project.bangjjack.domain.chat.infrastructure.event;
 
 import com.project.bangjjack.domain.chat.application.event.ChatRoomCreatedEvent;
+import com.project.bangjjack.domain.chat.infrastructure.pubsub.PubSubPublishExecutor;
 import com.project.bangjjack.global.infrastructure.JsonSerializer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,9 +21,15 @@ public class ChatRoomCreatedEventListener {
 
     private final RedissonClient redissonClient;
     private final JsonSerializer jsonSerializer;
+    private final PubSubPublishExecutor publishExecutor;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handle(ChatRoomCreatedEvent event) {
+        // DB 커넥션 반납 전에 Redis 를 기다리지 않도록 발행은 전용 실행기에서 한다.
+        publishExecutor.execute(event.roomId(), () -> publish(event));
+    }
+
+    private void publish(ChatRoomCreatedEvent event) {
         try {
             String json = jsonSerializer.serialize(event);
             RTopic topic = redissonClient.getTopic(CHANNEL, StringCodec.INSTANCE);
