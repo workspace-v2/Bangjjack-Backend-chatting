@@ -45,16 +45,5 @@ reviews:
       - "[Release]"
     base_branches:
       - "dev"
-      - "main"
-  poem: false
-  in_progress_fortune: false
-
-knowledge_base:
-  web_search:
-    enabled: true                  # 외부 최신 문서 검색은 유지
-  learnings:
-    scope: local                   # 이 저장소의 학습 내용만 사용
-  issues:
-    scope: local                   # 이 저장소의 이슈만 사용
-  pull_requests:
-    scope: local                   # 이 저장소의 PR 이력만 사용
+    ignore_title_keywords:
+      - "[Release]"
