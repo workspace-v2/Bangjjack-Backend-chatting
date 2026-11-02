@@ -52,11 +52,12 @@ public class ChatMessageUseCase {
 
         ChatRoom chatRoom = chatRoomGetService.getByIdAndValidateParticipant(roomId, senderId);
 
-        // 채팅방 락을 먼저 잡고(ChatSaveService 락 순서) 그 안에서 재입장 대상을 조회한다.
-        // 락 전에 조회하면 같은 방 동시 전송이 같은 LEFT 참여자를 각자 읽고, 나중 트랜잭션이 오래된 엔티티로
-        // 행 전체를 UPDATE 해 앞선 트랜잭션의 unread 증가분을 덮어쓸 수 있다.
+        // 채팅방 락을 먼저 잡고(ChatSaveService 락 순서: chat_room -> participant) 재입장 대상을 락 조회로 읽는다.
+        // - 락 전에 조회하면 같은 방 동시 전송이 같은 LEFT 참여자를 각자 읽고, 나중 트랜잭션이 오래된 엔티티로
+        //   앞선 트랜잭션의 unread 증가분을 덮어쓸 수 있다.
+        // - 락 뒤라도 일반 SELECT 는 REPEATABLE READ 스냅샷을 읽으므로, 최신 값을 보장하는 락 조회(FOR UPDATE)를 쓴다.
         chatSaveService.lockRoom(roomId);
-        chatRoomGetService.findLeftParticipantsByRoomId(roomId, senderId)
+        chatRoomGetService.findLeftParticipantsByRoomIdForUpdate(roomId, senderId)
                 .forEach(ChatRoomParticipant::rejoin);
 
         Chat savedChat = chatSaveService.save(senderId, chatRoom, request.content(), MessageType.USER);

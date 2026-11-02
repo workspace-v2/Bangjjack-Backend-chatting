@@ -48,6 +48,16 @@ public class ChatRoomGetService {
                 .toList();
     }
 
+    /**
+     * 채팅방 락을 잡은 트랜잭션에서 재입장 대상(LEFT 참여자)을 최신 값으로 조회한다 (쓰기 락 조회).
+     */
+    public List<ChatRoomParticipant> findLeftParticipantsByRoomIdForUpdate(Long roomId, Long excludeUserId) {
+        return chatRoomParticipantRepository.findLeftByRoomIdForUpdate(roomId)
+                .stream()
+                .filter(p -> !p.getUserId().equals(excludeUserId))
+                .toList();
+    }
+
     public Optional<ChatRoomParticipant> findParticipantIncludingLeft(Long roomId, Long userId) {
         return chatRoomParticipantRepository.findByChatRoomIdAndUserIdAndDeletedFalse(roomId, userId);
     }
