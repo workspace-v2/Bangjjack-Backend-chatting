@@ -37,6 +37,8 @@ reviews:
     enabled: true
     auto_incremental_review: true
     drafts: false                  # 작성 중인 PR은 준비 완료 후 리뷰
+    ignore_title_keywords:
+      - "[Release]"
     base_branches:
       - "dev"
       - "main"
