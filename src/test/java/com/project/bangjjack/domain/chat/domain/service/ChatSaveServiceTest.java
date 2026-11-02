@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ChatSaveService")
@@ -38,6 +39,8 @@ class ChatSaveServiceTest {
     @Mock
     private ChatRoomParticipantRepository chatRoomParticipantRepository;
 
+    @Mock private ChatStateUpdateService chatStateUpdateService;
+
     @InjectMocks
     private ChatSaveService chatSaveService;
 
@@ -54,10 +57,27 @@ class ChatSaveServiceTest {
         Chat result = chatSaveService.save(SENDER_ID, chatRoom, "안녕하세요", MessageType.USER);
 
         assertThat(result).isSameAs(saved);
-        InOrder order = inOrder(chatRoomRepository, chatRepository, chatRoomParticipantRepository, chatRoom);
-        order.verify(chatRoomRepository).findByIdForUpdate(ROOM_ID);
+        InOrder order = inOrder(chatStateUpdateService, chatRoomRepository, chatRepository, chatRoomParticipantRepository);
+        order.verify(chatStateUpdateService).lockRoom(ROOM_ID);
         order.verify(chatRepository).save(any(Chat.class));
-        order.verify(chatRoom).updateLastMessageAt(createdAt);
+        order.verify(chatRoomRepository).updateLastMessageAt(ROOM_ID, createdAt);
+        order.verify(chatRoomParticipantRepository).incrementUnreadCountExcludingSender(ROOM_ID, SENDER_ID);
+    }
+
+    @Test
+    @DisplayName("사용자 메시지는 재입장 작업 이후 메시지를 저장한다")
+    void saveWithRejoin_preparesParticipantsBeforeSaving() {
+        ChatRoom room = mock(ChatRoom.class);
+        given(room.getId()).willReturn(ROOM_ID);
+        Chat saved = mock(Chat.class);
+        given(chatRepository.save(any(Chat.class))).willReturn(saved);
+
+        assertThat(chatSaveService.saveWithRejoin(SENDER_ID, room, "안녕하세요")).isSameAs(saved);
+
+        InOrder order = inOrder(chatStateUpdateService, chatRepository, chatRoomRepository, chatRoomParticipantRepository);
+        order.verify(chatStateUpdateService).prepareUserMessage(ROOM_ID, SENDER_ID);
+        order.verify(chatRepository).save(any(Chat.class));
+        order.verify(chatRoomRepository).updateLastMessageAt(ROOM_ID, null);
         order.verify(chatRoomParticipantRepository).incrementUnreadCountExcludingSender(ROOM_ID, SENDER_ID);
     }
 }

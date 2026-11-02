@@ -13,16 +13,18 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 채팅 메시지 저장.
  *
- * 락 순서: chat_room 행 쓰기 락 -> chat INSERT -> chat_room_participant unread UPDATE -> chat_room last_message_at UPDATE(커밋 시)
+ * 같은 방의 메시지 저장은 chat_room 행 쓰기 락을 먼저 잡는다.
+ * 사용자 메시지는 그 뒤 발신자 상태를 현재 읽기로 검증하고 LEFT 참여자를 재입장시키고, 메시지 저장과 unread 갱신을 수행한다.
  * 이전에는 INSERT 의 외래키 확인이 chat_room 에 공유(S) 락을 먼저 잡고, 같은 방의 다른 트랜잭션이 participant 행 락을
  * 잡은 상태에서 서로 반대 순서로 상대 락을 기다려 데드락이 발생했다 (MySQL 데드락 로그로 확인).
- * 트랜잭션 시작 시 chat_room 행 쓰기 락을 먼저 잡으면 같은 방의 저장이 줄을 서서 처리되어 순환 대기가 생기지 않는다.
+ * 이 서비스에서 참여자를 조회하거나 변경하기 전에 채팅방 락을 잡아 같은 방의 저장을 직렬화한다.
  */
 @Service
 @RequiredArgsConstructor
 public class ChatSaveService {
 
     private final ChatRepository chatRepository;
+    private final ChatStateUpdateService chatStateUpdateService;
     private final ChatRoomRepository chatRoomRepository;
     private final ChatRoomParticipantRepository chatRoomParticipantRepository;
 
@@ -33,20 +35,23 @@ public class ChatSaveService {
 
     @Transactional
     public Chat save(Long senderId, ChatRoom chatRoom, String content, MessageType messageType, Long applicationId) {
-        lockRoom(chatRoom.getId());
+        chatStateUpdateService.lockRoom(chatRoom.getId());
+        return persistMessage(senderId, chatRoom, content, messageType, applicationId);
+    }
+
+    /** 사용자 메시지의 재입장과 저장을 하나의 트랜잭션 및 락 규칙으로 처리한다. */
+    @Transactional
+    public Chat saveWithRejoin(Long senderId, ChatRoom chatRoom, String content) {
+        chatStateUpdateService.prepareUserMessage(chatRoom.getId(), senderId);
+        return persistMessage(senderId, chatRoom, content, MessageType.USER, null);
+    }
+
+    private Chat persistMessage(Long senderId, ChatRoom chatRoom, String content,
+                               MessageType messageType, Long applicationId) {
         Chat saved = chatRepository.save(Chat.create(senderId, chatRoom, content, messageType, applicationId));
-        chatRoom.updateLastMessageAt(saved.getCreatedAt());
+        chatRoomRepository.updateLastMessageAt(chatRoom.getId(), saved.getCreatedAt());
         chatRoomParticipantRepository.incrementUnreadCountExcludingSender(chatRoom.getId(), senderId);
         return saved;
     }
 
-    /**
-     * 같은 방의 저장을 직렬화하기 위해 chat_room 행 쓰기 락을 잡는다.
-     * 같은 트랜잭션에서 participant 행을 먼저 수정해야 하는 경우(예: 나간 참여자 재입장)에는 그보다 먼저 호출한다.
-     * 이미 락을 가진 트랜잭션에서 다시 호출해도 기다리지 않는다.
-     */
-    @Transactional
-    public void lockRoom(Long roomId) {
-        chatRoomRepository.findByIdForUpdate(roomId);
-    }
 }

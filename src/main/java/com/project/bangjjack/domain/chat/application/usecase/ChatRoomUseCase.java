@@ -16,6 +16,7 @@ import com.project.bangjjack.domain.chat.domain.service.ChatRoomCreateService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.user.domain.entity.User;
 import com.project.bangjjack.domain.user.domain.service.UserGetService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ import java.util.Optional;
 public class ChatRoomUseCase {
 
     private final ChatRoomCreateService chatRoomCreateService;
+    private final ChatStateUpdateService chatStateUpdateService;
     private final ChatRoomGetService chatRoomGetService;
     private final ChatMessageGetService chatMessageGetService;
     private final UserGetService userGetService;
@@ -49,11 +51,8 @@ public class ChatRoomUseCase {
         Optional<ChatRoom> existing = chatRoomGetService.findByDirectRoomKey(directRoomKey);
         if (existing.isPresent()) {
             ChatRoom chatRoom = existing.get();
-            chatRoomGetService.findParticipantIncludingLeft(chatRoom.getId(), currentUserId)
-                    .filter(ChatRoomParticipant::isLeft)
-                    .ifPresent(ChatRoomParticipant::rejoin);
-            // 상대가 LEFT 상태여도 조회자 입장에서는 채팅방에 존재하는 것으로 표시해야 하므로 LEFT 포함 전체 조회
-            List<ChatRoomParticipant> participants = chatRoomGetService.findAllParticipantsByRoomId(chatRoom.getId());
+            List<ChatRoomParticipant> participants = chatStateUpdateService
+                    .rejoinAndGetParticipants(chatRoom.getId(), currentUserId);
             return ChatRoomResponse.from(chatRoom, participants, false);
         }
 
@@ -124,8 +123,6 @@ public class ChatRoomUseCase {
 
     @Transactional
     public void leaveChatRoom(Long roomId, Long userId) {
-        ChatRoomParticipant participant = chatRoomGetService.getActiveParticipant(roomId, userId);
-        Long latestMessageId = chatMessageGetService.findLatestMessageId(roomId).orElse(null);
-        participant.leave(latestMessageId);
+        chatStateUpdateService.leave(roomId, userId);
     }
 }

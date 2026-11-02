@@ -9,7 +9,6 @@ import com.project.bangjjack.domain.application.application.exception.InvalidTar
 import com.project.bangjjack.domain.application.application.exception.RecruitLimitReachedException;
 import com.project.bangjjack.domain.application.domain.entity.ApplicationStatus;
 import com.project.bangjjack.domain.application.domain.entity.RoommateApplication;
-import com.project.bangjjack.domain.application.domain.service.RoommateApplicationCreateService;
 import com.project.bangjjack.domain.application.domain.service.RoommateApplicationGetService;
 import com.project.bangjjack.domain.chat.application.event.ChatMessageSentEvent;
 import com.project.bangjjack.domain.chat.domain.entity.Chat;
@@ -19,10 +18,8 @@ import com.project.bangjjack.domain.chat.domain.entity.MessageType;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomCreateService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatSaveService;
-import com.project.bangjjack.domain.post.domain.entity.PostStatus;
 import com.project.bangjjack.domain.post.domain.entity.RoomSize;
 import com.project.bangjjack.domain.post.domain.entity.RoommatePost;
-import com.project.bangjjack.domain.post.domain.service.RoommatePostGetService;
 import com.project.bangjjack.domain.roommategroup.domain.entity.GroupMemberRole;
 import com.project.bangjjack.domain.roommategroup.domain.entity.RoommateGroup;
 import com.project.bangjjack.domain.roommategroup.domain.service.RoommateGroupGetService;
@@ -33,7 +30,7 @@ import com.project.bangjjack.domain.user.domain.entity.Dormitory;
 import com.project.bangjjack.domain.user.domain.entity.Gender;
 import com.project.bangjjack.domain.user.domain.entity.Semester;
 import com.project.bangjjack.domain.user.domain.entity.User;
-import com.project.bangjjack.domain.user.domain.service.UserGetService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -82,6 +79,8 @@ class RoommateApplicationUseCaseProcessTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock private ChatStateUpdateService chatStateUpdateService;
 
     @InjectMocks
     private RoommateApplicationUseCase roommateApplicationUseCase;
@@ -327,7 +326,7 @@ class RoommateApplicationUseCaseProcessTest {
                     AUTHOR_ID, APPLICATION_ID, new ProcessRoommateApplicationRequest(ApplicationStatus.ACCEPTED));
 
             // then
-            assertThat(chatRoom.getCategory()).isEqualTo(ChatRoomCategory.GENERAL);
+            org.mockito.Mockito.verify(chatStateUpdateService).updateCategory(chatRoom.getId(), ChatRoomCategory.GENERAL);
         }
 
         @Test
@@ -349,7 +348,7 @@ class RoommateApplicationUseCaseProcessTest {
                     AUTHOR_ID, APPLICATION_ID, new ProcessRoommateApplicationRequest(ApplicationStatus.REJECTED));
 
             // then
-            assertThat(chatRoom.getCategory()).isEqualTo(ChatRoomCategory.GENERAL);
+            org.mockito.Mockito.verify(chatStateUpdateService).updateCategory(chatRoom.getId(), ChatRoomCategory.GENERAL);
         }
 
         @Test

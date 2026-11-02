@@ -10,10 +10,10 @@ import com.project.bangjjack.domain.chat.application.exception.InvalidMessageCon
 import com.project.bangjjack.domain.chat.domain.entity.Chat;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoom;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoomParticipant;
-import com.project.bangjjack.domain.chat.domain.entity.MessageType;
 import com.project.bangjjack.domain.chat.domain.service.ChatMessageGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.domain.service.ChatSaveService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +33,7 @@ public class ChatMessageUseCase {
 
     private final ChatRoomGetService chatRoomGetService;
     private final ChatSaveService chatSaveService;
+    private final ChatStateUpdateService chatStateUpdateService;
     private final ChatMessageGetService chatMessageGetService;
     private final ApplicationEventPublisher eventPublisher;
     private final Validator validator;
@@ -52,14 +53,7 @@ public class ChatMessageUseCase {
 
         ChatRoom chatRoom = chatRoomGetService.getByIdAndValidateParticipant(roomId, senderId);
 
-        List<ChatRoomParticipant> leftParticipants = chatRoomGetService.findLeftParticipantsByRoomId(roomId, senderId);
-        if (!leftParticipants.isEmpty()) {
-            // 재입장은 participant 행을 수정하므로, 데드락 방지를 위해 채팅방 락을 먼저 잡는다 (ChatSaveService 락 순서)
-            chatSaveService.lockRoom(roomId);
-            leftParticipants.forEach(ChatRoomParticipant::rejoin);
-        }
-
-        Chat savedChat = chatSaveService.save(senderId, chatRoom, request.content(), MessageType.USER);
+        Chat savedChat = chatSaveService.saveWithRejoin(senderId, chatRoom, request.content());
         log.debug("[채팅 송신] DB 저장 완료 - messageId={}", savedChat.getId());
 
         ChatMessageBroadcast broadcast = ChatMessageBroadcast.from(savedChat, roomId);
@@ -69,12 +63,7 @@ public class ChatMessageUseCase {
 
     @Transactional
     public void markAsRead(Long userId, Long roomId, Long messageId) {
-        // messageId가 해당 roomId 소속인지 별도 검증하지 않음.
-        // 호출자는 이미 인증 + 참여자 검증을 통과한 유저이며, 잘못된 messageId를 보내도
-        // 본인의 lastReadMessageId만 오염되고 다음 정상 READ에서 자연 복구됨.
-        // 매 호출마다 DB 조회를 추가하는 비용 대비 실질적 위협이 낮아 의도적으로 생략.
-        ChatRoomParticipant participant = chatRoomGetService.getActiveParticipant(roomId, userId);
-        markAsReadAndPublish(participant, roomId, userId, messageId);
+        markAsReadAndPublish(roomId, userId, messageId);
     }
 
     @Transactional
@@ -87,7 +76,13 @@ public class ChatMessageUseCase {
         List<Chat> content = hasNext ? fetched.subList(0, size) : fetched;
 
         if (!content.isEmpty()) {
-            markAsReadAndPublish(participant, roomId, currentUserId, content.get(0).getId());
+            Long newestId = content.get(0).getId();
+            Long lastReadId = participant.getLastReadMessageId();
+            // 커서는 단조 증가하므로 이미 읽은 페이지는 방 락 없이 건너뛴다.
+            // 스냅샷이 오래돼 커서가 작게 보이면 기존 락과 조건부 UPDATE가 최종 판단한다.
+            if (lastReadId == null || lastReadId < newestId) {
+                markAsReadAndPublish(roomId, currentUserId, newestId);
+            }
         }
         Long nextCursor = hasNext ? content.get(content.size() - 1).getId() : null;
 
@@ -100,11 +95,8 @@ public class ChatMessageUseCase {
         return ChatMessagePageResponse.of(messages, nextCursor, hasNext, partnerLastReadMessageId);
     }
 
-    private void markAsReadAndPublish(ChatRoomParticipant participant, Long roomId, Long userId, Long messageId) {
-        // 동시 READ 요청 시 두 트랜잭션이 모두 true를 반환해 이벤트가 2회 발행될 수 있음.
-        // 읽음 처리는 최종 상태가 동일하므로 낙관적 락 없이 허용하며,
-        // 클라이언트에서 동일 {readerId, messageId} 수신 시 중복 무시로 대응.
-        if (participant.markAsRead(messageId)) {
+    private void markAsReadAndPublish(Long roomId, Long userId, Long messageId) {
+        if (chatStateUpdateService.markAsRead(roomId, userId, messageId)) {
             eventPublisher.publishEvent(new ReadReceiptEvent(roomId, userId, messageId));
         }
     }

@@ -27,6 +27,7 @@ import com.project.bangjjack.domain.user.domain.entity.Gender;
 import com.project.bangjjack.domain.user.domain.entity.Semester;
 import com.project.bangjjack.domain.user.domain.entity.User;
 import com.project.bangjjack.domain.user.domain.service.UserGetService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -84,6 +85,8 @@ class RoommateApplicationUseCaseCancelTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock private ChatStateUpdateService chatStateUpdateService;
 
     @InjectMocks
     private RoommateApplicationUseCase roommateApplicationUseCase;
@@ -161,7 +164,7 @@ class RoommateApplicationUseCaseCancelTest {
 
             // then
             assertThat(application.getStatus()).isEqualTo(ApplicationStatus.CANCELED);
-            assertThat(chatRoom.getCategory()).isEqualTo(ChatRoomCategory.GENERAL);
+            org.mockito.Mockito.verify(chatStateUpdateService).updateCategory(chatRoom.getId(), ChatRoomCategory.GENERAL);
             then(chatSaveService).should().save(APPLICANT_ID, chatRoom, CANCELED_MESSAGE, MessageType.APPLICATION_CANCELED, APPLICATION_ID);
         }
 

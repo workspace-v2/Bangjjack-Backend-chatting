@@ -11,6 +11,7 @@ import com.project.bangjjack.domain.chat.domain.service.ChatRoomCreateService;
 import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.user.application.exception.UserNotFoundException;
 import com.project.bangjjack.domain.user.domain.service.UserGetService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import org.junit.jupiter.api.DisplayName;
 import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.Nested;
@@ -47,6 +48,8 @@ class ChatRoomUseCaseCreateDirectRoomTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock private ChatStateUpdateService chatStateUpdateService;
 
     @InjectMocks
     private ChatRoomUseCase chatRoomUseCase;
@@ -101,7 +104,7 @@ class ChatRoomUseCaseCreateDirectRoomTest {
             given(userGetService.getById(targetUserId)).willReturn(null);
             given(chatRoomCreateService.createDirectKey(currentUserId, targetUserId)).willReturn("DM_1_2");
             given(chatRoomGetService.findByDirectRoomKey(anyString())).willReturn(Optional.of(existingRoom));
-            given(chatRoomGetService.findAllParticipantsByRoomId(any())).willReturn(participants);
+            given(chatStateUpdateService.rejoinAndGetParticipants(any(), any())).willReturn(participants);
 
             // when
             ChatRoomResponse response = chatRoomUseCase.createDirectRoom(currentUserId, request);
@@ -129,7 +132,7 @@ class ChatRoomUseCaseCreateDirectRoomTest {
             given(userGetService.getById(userA)).willReturn(null);
             given(chatRoomCreateService.createDirectKey(userB, userA)).willReturn("DM_1_2");
             given(chatRoomGetService.findByDirectRoomKey("DM_1_2")).willReturn(Optional.of(existingRoom));
-            given(chatRoomGetService.findAllParticipantsByRoomId(any())).willReturn(participants);
+            given(chatStateUpdateService.rejoinAndGetParticipants(any(), any())).willReturn(participants);
 
             // when
             ChatRoomResponse response = chatRoomUseCase.createDirectRoom(userB, request);
