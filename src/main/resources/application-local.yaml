@@ -72,6 +72,11 @@ management:
   tracing:
     export:
       enabled: ${TRACING_EXPORT_ENABLED:false}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces} # 엔드포인트가 없으면 exporter 가 생성되지 않는다
   otlp:
     metrics:
       export:
