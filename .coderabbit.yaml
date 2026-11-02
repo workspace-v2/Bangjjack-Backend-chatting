@@ -36,4 +36,5 @@ reviews:
     drafts: false                  # 작성 중인 PR은 준비 완료 후 리뷰
     base_branches:
       - "dev"
-      - "main"
+    ignore_title_keywords:
+      - "[Release]"
