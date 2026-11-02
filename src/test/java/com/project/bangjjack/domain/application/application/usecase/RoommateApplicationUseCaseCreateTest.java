@@ -29,6 +29,7 @@ import com.project.bangjjack.domain.user.domain.entity.Gender;
 import com.project.bangjjack.domain.user.domain.entity.Semester;
 import com.project.bangjjack.domain.user.domain.entity.User;
 import com.project.bangjjack.domain.user.domain.service.UserGetService;
+import com.project.bangjjack.domain.chat.domain.service.ChatStateUpdateService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -81,6 +82,8 @@ class RoommateApplicationUseCaseCreateTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock private ChatStateUpdateService chatStateUpdateService;
 
     @InjectMocks
     private RoommateApplicationUseCase roommateApplicationUseCase;
