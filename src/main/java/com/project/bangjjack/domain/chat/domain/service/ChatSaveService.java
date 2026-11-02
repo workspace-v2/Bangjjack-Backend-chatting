@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 이전에는 INSERT 의 외래키 확인이 chat_room 에 공유(S) 락을 먼저 잡고, 같은 방의 다른 트랜잭션이 participant 행 락을
  * 잡은 상태에서 서로 반대 순서로 상대 락을 기다려 데드락이 발생했다 (MySQL 데드락 로그로 확인).
  * 이 서비스에서 참여자를 조회하거나 변경하기 전에 채팅방 락을 잡아 같은 방의 저장을 직렬화한다.
+ * 방별 seq 도 같은 락 안에서 발급하므로 추가 경합 없이 빈틈없는 순번이 보장된다.
  */
 @Service
 @RequiredArgsConstructor
@@ -48,7 +49,8 @@ public class ChatSaveService {
 
     private Chat persistMessage(Long senderId, ChatRoom chatRoom, String content,
                                MessageType messageType, Long applicationId) {
-        Chat saved = chatRepository.save(Chat.create(senderId, chatRoom, content, messageType, applicationId));
+        long seq = chatStateUpdateService.nextSeq(chatRoom.getId());
+        Chat saved = chatRepository.save(Chat.create(senderId, chatRoom, content, messageType, applicationId, seq));
         chatRoomRepository.updateLastMessageAt(chatRoom.getId(), saved.getCreatedAt());
         chatRoomParticipantRepository.incrementUnreadCountExcludingSender(chatRoom.getId(), senderId);
         return saved;

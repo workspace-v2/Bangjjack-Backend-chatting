@@ -2,6 +2,7 @@ package com.project.bangjjack.domain.chat.infrastructure.broadcaster;
 
 import com.project.bangjjack.domain.chat.application.dto.response.ChatMessageBroadcast;
 import com.project.bangjjack.domain.chat.application.dto.response.ReadReceiptBroadcast;
+import com.project.bangjjack.domain.chat.application.dto.response.SyncRequiredBroadcast;
 import com.project.bangjjack.global.infrastructure.JsonSerializer;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
 import io.micrometer.tracing.Span;
@@ -13,6 +14,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.util.Collection;
+import java.util.Set;
 
 @Slf4j
 @Component
@@ -33,6 +35,20 @@ public class WebSocketBroadcaster implements ChatBroadcaster {
     public void broadcastReadReceipt(Long roomId, ReadReceiptBroadcast broadcast) {
         sendToRoom(roomId, jsonSerializer.serialize(broadcast), broadcast.type().name());
         log.debug("[WS Broadcast] 읽음 알림 브로드캐스트 완료 - roomId={}, readerId={}", roomId, broadcast.readerId());
+    }
+
+    @Override
+    public void broadcastSyncRequired() {
+        Span span = tracer.nextSpan().name("chat.ws.sync-required").start();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            Set<Long> roomIds = sessionStore.getSubscribedRoomIds();
+            roomIds.forEach(roomId -> sendToRoom(roomId, jsonSerializer.serialize(SyncRequiredBroadcast.of(roomId)),
+                    "SYNC_REQUIRED"));
+            span.tag("ws.rooms", String.valueOf(roomIds.size()));
+            log.info("[WS Broadcast] 재동기화 신호 전송 - rooms={}", roomIds.size());
+        } finally {
+            span.end();
+        }
     }
 
     /**

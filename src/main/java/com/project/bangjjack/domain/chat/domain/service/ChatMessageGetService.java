@@ -26,6 +26,12 @@ public class ChatMessageGetService {
         return chatRepository.findByCursorPage(roomId, cursorId, PageRequest.of(0, size + 1));
     }
 
+    /** size + 1 개까지 조회해 다음 페이지 여부를 판단한다. */
+    public List<Chat> getMessagesForSync(Long roomId, long afterSeq, long untilSeq, Long visibleFromMessageId, int size) {
+        long visibleFrom = visibleFromMessageId != null ? visibleFromMessageId : 0L;
+        return chatRepository.findSyncPage(roomId, afterSeq, untilSeq, visibleFrom, PageRequest.of(0, size + 1));
+    }
+
     public Optional<Long> findLatestMessageId(Long roomId) {
         return chatRepository.findLatestMessageIdByRoomId(roomId);
     }

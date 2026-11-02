@@ -10,6 +10,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 final class PubSubMetrics {
 
     static final String PUBLISH_FAILURE_METRIC = "chat.pubsub.publish.failures";
+    static final String RESUBSCRIBED_METRIC = "chat.pubsub.resubscribed";
     static final String CHANNEL_TAG = "channel";
     static final String CHANNEL_CHAT_MESSAGE = "chat_message";
     static final String CHANNEL_READ_RECEIPT = "read_receipt";

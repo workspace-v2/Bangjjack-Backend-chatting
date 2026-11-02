@@ -133,7 +133,7 @@ class RoommateApplicationUseCaseProcessTest {
     private void stubChatSaved(ChatRoom room, String content, MessageType messageType) {
         given(chatSaveService.save(eq(AUTHOR_ID), eq(room), eq(content), eq(messageType), eq(APPLICATION_ID)))
                 .willAnswer(invocation -> {
-                    Chat chat = Chat.create(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), messageType, APPLICATION_ID);
+                    Chat chat = Chat.create(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), messageType, APPLICATION_ID, 1L);
                     ReflectionTestUtils.setField(chat, "id", CHAT_ID);
                     return chat;
                 });

@@ -35,6 +35,13 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
     void updateLastMessageAt(@Param("roomId") Long roomId, @Param("sentAt") LocalDateTime sentAt);
 
     @Modifying(flushAutomatically = true)
+    @Query("UPDATE ChatRoom r SET r.lastSeq = r.lastSeq + 1, r.updatedAt = CURRENT_TIMESTAMP WHERE r.id = :roomId")
+    int incrementLastSeq(@Param("roomId") Long roomId);
+
+    @Query("SELECT r.lastSeq FROM ChatRoom r WHERE r.id = :roomId")
+    Optional<Long> findLastSeq(@Param("roomId") Long roomId);
+
+    @Modifying(flushAutomatically = true)
     @Query("UPDATE ChatRoom r SET r.category = :category, r.updatedAt = CURRENT_TIMESTAMP WHERE r.id = :roomId")
     void updateCategory(@Param("roomId") Long roomId, @Param("category") ChatRoomCategory category);
 }

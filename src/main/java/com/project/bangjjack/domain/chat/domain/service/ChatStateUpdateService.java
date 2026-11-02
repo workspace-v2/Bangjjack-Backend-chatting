@@ -34,6 +34,15 @@ public class ChatStateUpdateService {
         chatRoomRepository.findByIdForUpdate(roomId).orElseThrow(ChatRoomNotFoundException::new);
     }
 
+    /**
+     * 방의 다음 메시지 seq 를 발급한다. 호출 전에 반드시 lockRoom 으로 방 락을 잡아야 한다
+     * (같은 방의 저장이 직렬화되므로 seq 가 빈틈없이 증가하고, 커밋 순서와 seq 순서가 같다).
+     */
+    long nextSeq(Long roomId) {
+        chatRoomRepository.incrementLastSeq(roomId);
+        return chatRoomRepository.findLastSeq(roomId).orElseThrow(ChatRoomNotFoundException::new);
+    }
+
     void prepareUserMessage(Long roomId, Long senderId) {
         lockRoom(roomId);
         getActiveParticipantForUpdate(roomId, senderId);

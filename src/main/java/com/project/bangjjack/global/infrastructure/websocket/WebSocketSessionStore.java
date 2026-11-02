@@ -62,6 +62,11 @@ public class WebSocketSessionStore {
         });
     }
 
+    /** 이 서버에서 구독 중인 세션이 있는 방 목록 (스냅샷). */
+    public Set<Long> getSubscribedRoomIds() {
+        return Set.copyOf(roomSessions.keySet());
+    }
+
     public Collection<WebSocketSession> getSessionsByRoom(Long roomId) {
         ConcurrentHashMap<String, WebSocketSession> sessions = roomSessions.get(roomId);
         return sessions != null ? sessions.values() : Collections.emptyList();
