@@ -11,4 +11,7 @@ import com.project.bangjjack.domain.chat.application.dto.response.ReadReceiptBro
 public interface ChatBroadcaster {
     void broadcastToRoom(Long roomId, ChatMessageBroadcast broadcast);
     void broadcastReadReceipt(Long roomId, ReadReceiptBroadcast broadcast);
+
+    /** 이 서버에 연결된 모든 방의 세션에 재동기화 신호를 보낸다. */
+    void broadcastSyncRequired();
 }
