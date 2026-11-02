@@ -75,6 +75,16 @@ management:
   endpoint:
     health:
       show-details: never
+      # 로드밸런서(ALB)는 /actuator/health/liveness 만 본다.
+      # 전체 상태(/actuator/health)는 DB 등 외부 의존성을 포함해, 의존성 장애나 커넥션 고갈 때
+      # 정상 프로세스까지 unhealthy 로 판정되어 ECS 가 태스크를 교체하는 장애 전파가 생긴다.
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState, ping   # 프로세스 생존 여부만 (외부 의존성 제외)
+        readiness:
+          include: readinessState, db    # 트래픽 받을 준비 상태 (모니터링 참고용)
   metrics:
     tags:
       application: ${spring.application.name}
