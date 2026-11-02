@@ -39,3 +39,12 @@ jwt:
   access:
     secret: dGVzdC1zZWNyZXQta2V5LWZvci1qdW5pdC10ZXN0aW5nLW9ubHktbm90LWZvci1wcm9k
     expiration-seconds: 259200
+
+management:
+  tracing:
+    export:
+      enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false

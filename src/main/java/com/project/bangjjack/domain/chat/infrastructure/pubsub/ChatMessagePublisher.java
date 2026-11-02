@@ -27,21 +27,31 @@ public class ChatMessagePublisher {
     private final RedissonClient redissonClient;
     private final JsonSerializer jsonSerializer;
     private final Counter publishFailureCounter;
+    private final PubSubTracing pubSubTracing;
 
-    public ChatMessagePublisher(RedissonClient redissonClient, JsonSerializer jsonSerializer, MeterRegistry meterRegistry) {
+    public ChatMessagePublisher(
+            RedissonClient redissonClient,
+            JsonSerializer jsonSerializer,
+            MeterRegistry meterRegistry,
+            PubSubTracing pubSubTracing
+    ) {
         this.redissonClient = redissonClient;
         this.jsonSerializer = jsonSerializer;
+        this.pubSubTracing = pubSubTracing;
         this.publishFailureCounter = PubSubMetrics.publishFailureCounter(meterRegistry, PubSubMetrics.CHANNEL_CHAT_MESSAGE);
     }
 
     public void publish(Long roomId, ChatMessageBroadcast broadcast) {
         try {
-            String json = jsonSerializer.serialize(broadcast);
+            pubSubTracing.tag("chat.room.id", roomId);
+            pubSubTracing.tag("chat.message.id", broadcast.messageId());
+            String json = pubSubTracing.inject(jsonSerializer.serialize(broadcast));
             RTopic topic = redissonClient.getTopic(CHANNEL_PREFIX + roomId, StringCodec.INSTANCE);
             topic.publish(json);
             log.debug("[Redis Pub/Sub] 메시지 발행 완료 - channel={}, messageId={}", CHANNEL_PREFIX + roomId, broadcast.messageId());
         } catch (Exception e) {
             publishFailureCounter.increment();
+            pubSubTracing.error(e);
             log.error("[Redis Pub/Sub] 메시지 발행 실패 - roomId={}, messageId={}, 원인={}", roomId, broadcast.messageId(), e.getMessage(), e);
         }
     }

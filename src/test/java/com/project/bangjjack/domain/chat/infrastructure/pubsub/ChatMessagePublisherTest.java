@@ -1,5 +1,6 @@
 package com.project.bangjjack.domain.chat.infrastructure.pubsub;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bangjjack.domain.chat.application.dto.response.ChatMessageBroadcast;
 import com.project.bangjjack.domain.chat.application.dto.response.WebSocketBroadcastType;
 import com.project.bangjjack.domain.chat.domain.entity.MessageType;
@@ -47,7 +48,7 @@ class ChatMessagePublisherTest {
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        publisher = new ChatMessagePublisher(redissonClient, jsonSerializer, meterRegistry);
+        publisher = new ChatMessagePublisher(redissonClient, jsonSerializer, meterRegistry, PubSubTracing.noop(new ObjectMapper()));
     }
 
     @Test

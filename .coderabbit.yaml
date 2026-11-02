@@ -3,7 +3,7 @@
 language: ko-KR
 
 reviews:
-  profile: chill                 # 사소한 스타일 지적은 줄이고 동작/설계 위주로
+  profile: chill
   request_changes_workflow: false
   high_level_summary: true
   # 핵심 코드 리뷰와 요약은 유지하고 부가 생성·탐색 작업은 생략한다.
@@ -14,9 +14,16 @@ reviews:
   related_prs: false
   suggested_labels: false
   suggested_reviewers: false
+  tools:
+    ast-grep:
+      essential_rules: false      # 기본 AST 규칙은 생략하고 저장소 자체 규칙이 있을 때만 실행
   path_filters:
     - "!src/main/resources/db/migration/V1__baseline.sql"   # 운영 DB 덤프 기반 기준 스키마
     - "!.claude/**"                                         # 기능 명세 문서
+    - "!**/*.md"
+    - "!**/*.mdx"
+    - "!**/*.rst"
+    - "!**/*.adoc"
     - "!build/**"
     - "!.gradle/**"
     - "!gradle/wrapper/gradle-wrapper.jar"                    # 생성된 바이너리
@@ -32,8 +39,10 @@ reviews:
       instructions: "장애/경계 상황을 실제로 검증하는지, 검증 없이 통과하는 테스트가 없는지 확인한다."
   auto_review:
     enabled: true
-    auto_incremental_review: true  # 후속 push에도 증분 리뷰 유지
+    auto_incremental_review: true
     drafts: false                  # 작성 중인 PR은 준비 완료 후 리뷰
+    ignore_title_keywords:
+      - "[Release]"
     base_branches:
       - "dev"
     ignore_title_keywords:

@@ -23,6 +23,7 @@ public class ReadReceiptSubscriber {
     private final RedissonClient redissonClient;
     private final ObjectMapper objectMapper;
     private final ChatBroadcaster chatBroadcaster;
+    private final PubSubTracing pubSubTracing;
 
     @PostConstruct
     public void subscribe() {
@@ -31,9 +32,13 @@ public class ReadReceiptSubscriber {
             patternTopic.addListener(String.class, (pattern, channel, json) -> {
                 log.debug("[Redis Sub] 읽음 알림 수신 - channel={}", channel);
                 try {
-                    ReadReceiptBroadcast broadcast = objectMapper.readValue(json, ReadReceiptBroadcast.class);
-                    chatBroadcaster.broadcastReadReceipt(broadcast.roomId(), broadcast);
-                    log.debug("[Redis Sub] 읽음 알림 브로드캐스트 완료 - roomId={}, readerId={}", broadcast.roomId(), broadcast.readerId());
+                    pubSubTracing.receive("chat.pubsub.receive-read-receipt", channel, json, node -> {
+                        ReadReceiptBroadcast broadcast = objectMapper.treeToValue(node, ReadReceiptBroadcast.class);
+                        pubSubTracing.tag("chat.room.id", broadcast.roomId());
+                        pubSubTracing.tag("chat.read.message.id", broadcast.lastReadMessageId());
+                        chatBroadcaster.broadcastReadReceipt(broadcast.roomId(), broadcast);
+                        log.debug("[Redis Sub] 읽음 알림 브로드캐스트 완료 - roomId={}, readerId={}", broadcast.roomId(), broadcast.readerId());
+                    });
                 } catch (Exception e) {
                     log.error("[Redis Sub] 읽음 알림 처리 실패 - channel={}, 원인={}", channel, e.getMessage(), e);
                 }

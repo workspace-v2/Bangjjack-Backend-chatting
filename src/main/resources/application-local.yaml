@@ -66,3 +66,18 @@ logging:
 
 dev:
   secret: ${DEV_SECRET:local-dev-secret}
+
+# 로컬은 Tempo 가 없으므로 기본적으로 트레이스 전송을 끈다 (로그의 traceId 는 그대로 출력)
+management:
+  tracing:
+    export:
+      enabled: ${TRACING_EXPORT_ENABLED:false}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces} # 엔드포인트가 없으면 exporter 가 생성되지 않는다
+  otlp:
+    metrics:
+      export:
+        enabled: false
