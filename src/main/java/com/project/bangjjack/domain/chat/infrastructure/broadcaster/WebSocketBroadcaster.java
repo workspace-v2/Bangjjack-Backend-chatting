@@ -57,6 +57,7 @@ public class WebSocketBroadcaster implements ChatBroadcaster {
                     sent++;
                 } catch (Exception e) {
                     failed++;
+                    span.error(e); // 나머지 세션 전송은 계속하되, 실패를 트레이스 오류로 남긴다
                     log.warn("[WS Broadcast] 전송 실패 - sessionId={}, roomId={}, 원인={}", session.getId(), roomId, e.getMessage());
                 }
             }
