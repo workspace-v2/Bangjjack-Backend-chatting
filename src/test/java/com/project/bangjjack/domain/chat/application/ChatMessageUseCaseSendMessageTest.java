@@ -42,11 +42,11 @@ class ChatMessageUseCaseSendMessageTest {
     private ChatMessageUseCase chatMessageUseCase;
 
     @Test
-    @DisplayName("채팅방 락을 먼저 잡은 뒤 재입장 대상을 조회하고, 그 다음 메시지를 저장한다")
+    @DisplayName("채팅방 락을 먼저 잡은 뒤 재입장 대상을 락 조회로 읽고, 그 다음 메시지를 저장한다")
     void sendMessage_locksRoomBeforeReadingLeftParticipants() {
         ChatRoom chatRoom = mock(ChatRoom.class);
         given(chatRoomGetService.getByIdAndValidateParticipant(ROOM_ID, SENDER_ID)).willReturn(chatRoom);
-        given(chatRoomGetService.findLeftParticipantsByRoomId(ROOM_ID, SENDER_ID)).willReturn(List.of());
+        given(chatRoomGetService.findLeftParticipantsByRoomIdForUpdate(ROOM_ID, SENDER_ID)).willReturn(List.of());
         given(chatSaveService.save(eq(SENDER_ID), eq(chatRoom), eq("안녕하세요"), eq(MessageType.USER)))
                 .willReturn(mock(Chat.class));
 
@@ -54,7 +54,7 @@ class ChatMessageUseCaseSendMessageTest {
 
         InOrder order = inOrder(chatSaveService, chatRoomGetService);
         order.verify(chatSaveService).lockRoom(ROOM_ID);
-        order.verify(chatRoomGetService).findLeftParticipantsByRoomId(ROOM_ID, SENDER_ID);
+        order.verify(chatRoomGetService).findLeftParticipantsByRoomIdForUpdate(ROOM_ID, SENDER_ID);
         order.verify(chatSaveService).save(SENDER_ID, chatRoom, "안녕하세요", MessageType.USER);
     }
 }
