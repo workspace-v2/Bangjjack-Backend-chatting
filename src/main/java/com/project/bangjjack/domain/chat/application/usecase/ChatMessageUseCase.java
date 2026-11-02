@@ -52,8 +52,12 @@ public class ChatMessageUseCase {
 
         ChatRoom chatRoom = chatRoomGetService.getByIdAndValidateParticipant(roomId, senderId);
 
-        chatRoomGetService.findLeftParticipantsByRoomId(roomId, senderId)
-                .forEach(ChatRoomParticipant::rejoin);
+        List<ChatRoomParticipant> leftParticipants = chatRoomGetService.findLeftParticipantsByRoomId(roomId, senderId);
+        if (!leftParticipants.isEmpty()) {
+            // 재입장은 participant 행을 수정하므로, 데드락 방지를 위해 채팅방 락을 먼저 잡는다 (ChatSaveService 락 순서)
+            chatSaveService.lockRoom(roomId);
+            leftParticipants.forEach(ChatRoomParticipant::rejoin);
+        }
 
         Chat savedChat = chatSaveService.save(senderId, chatRoom, request.content(), MessageType.USER);
         log.debug("[채팅 송신] DB 저장 완료 - messageId={}", savedChat.getId());
