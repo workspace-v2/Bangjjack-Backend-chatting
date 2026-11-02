@@ -2,6 +2,8 @@ package com.project.bangjjack.domain.chat.infrastructure.pubsub;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,6 +15,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.mock;
 
 @DisplayName("PubSubPublishExecutor")
 class PubSubPublishExecutorTest {
@@ -102,5 +107,33 @@ class PubSubPublishExecutorTest {
         executor.execute(1L, next::countDown);
 
         assertThat(next.await(1, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    @DisplayName("대기열 초과로 버려지면 제출 시점 span 에 버림 이벤트를 남긴다 (손실 지점 추적)")
+    void fullQueue_marksRejectedOnCurrentSpan() throws InterruptedException {
+        Tracer tracer = mock(Tracer.class);
+        Span requestSpan = mock(Span.class);
+        given(tracer.currentSpan()).willReturn(requestSpan);
+        given(requestSpan.isNoop()).willReturn(true); // 레인 쪽 span 생성은 건너뛰고 버림 처리만 검증
+        executor = new PubSubPublishExecutor(meterRegistry, tracer, 1, 1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch started = new CountDownLatch(1);
+
+        executor.execute(1L, () -> {
+            started.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+        executor.execute(1L, () -> { });
+        executor.execute(1L, () -> { }); // 초과 -> 버림
+
+        then(requestSpan).should().event("pubsub.publish.rejected");
+        then(requestSpan).should().tag("pubsub.rejected", "true");
+        release.countDown();
     }
 }

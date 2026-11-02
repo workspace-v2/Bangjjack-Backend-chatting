@@ -1,5 +1,6 @@
 package com.project.bangjjack.domain.chat.infrastructure.pubsub;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bangjjack.domain.chat.application.dto.response.ReadReceiptBroadcast;
 import com.project.bangjjack.global.infrastructure.JsonSerializer;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -43,7 +44,7 @@ class ReadReceiptPublisherTest {
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        publisher = new ReadReceiptPublisher(redissonClient, jsonSerializer, meterRegistry);
+        publisher = new ReadReceiptPublisher(redissonClient, jsonSerializer, meterRegistry, PubSubTracing.noop(new ObjectMapper()));
     }
 
     @Test
