@@ -18,6 +18,11 @@ public interface ChatRepository extends JpaRepository<Chat, Long> {
     @Query("SELECT c FROM Chat c WHERE c.chatRoom.id = :roomId AND c.id < :cursorId AND c.id > :visibleFromMessageId AND c.deleted = false ORDER BY c.id DESC")
     List<Chat> findByCursorPageAfterMessageId(@Param("roomId") Long roomId, @Param("cursorId") Long cursorId, @Param("visibleFromMessageId") Long visibleFromMessageId, Pageable pageable);
 
+    /** 동기화: afterSeq 다음부터 untilSeq 까지, 재입장 이후(visibleFromMessageId 초과) 메시지를 seq 오름차순으로. */
+    @Query("SELECT c FROM Chat c WHERE c.chatRoom.id = :roomId AND c.seq > :afterSeq AND c.seq <= :untilSeq AND c.id > :visibleFromMessageId AND c.deleted = false ORDER BY c.seq ASC")
+    List<Chat> findSyncPage(@Param("roomId") Long roomId, @Param("afterSeq") long afterSeq, @Param("untilSeq") long untilSeq,
+                            @Param("visibleFromMessageId") long visibleFromMessageId, Pageable pageable);
+
     @Query("SELECT MAX(c.id) FROM Chat c WHERE c.chatRoom.id = :roomId AND c.deleted = false")
     Optional<Long> findLatestMessageIdByRoomId(@Param("roomId") Long roomId);
 

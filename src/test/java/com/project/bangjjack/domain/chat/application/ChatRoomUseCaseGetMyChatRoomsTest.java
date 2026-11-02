@@ -104,7 +104,7 @@ class ChatRoomUseCaseGetMyChatRoomsTest {
             ChatRoom room = createRoomWithIdAndTime(10L, LocalDateTime.now());
             ChatRoomParticipant myParticipant = createParticipant(room, USER_ID, 3L);
             User partner = createUser(PARTNER_ID, "파트너");
-            Chat lastChat = Chat.create(USER_ID, room, "안녕하세요", MessageType.USER);
+            Chat lastChat = Chat.create(USER_ID, room, "안녕하세요", MessageType.USER, 1L);
 
             given(chatRoomGetService.findMyDirectParticipantsPage(USER_ID, null, null, 20, null))
                     .willReturn(List.of(myParticipant));

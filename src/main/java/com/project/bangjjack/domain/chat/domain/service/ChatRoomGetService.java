@@ -24,6 +24,10 @@ public class ChatRoomGetService {
     private final ChatRoomRepository chatRoomRepository;
     private final ChatRoomParticipantRepository chatRoomParticipantRepository;
 
+    public long getLastSeq(Long roomId) {
+        return chatRoomRepository.findLastSeq(roomId).orElseThrow(ChatRoomNotFoundException::new);
+    }
+
     public Optional<ChatRoom> findByDirectRoomKey(String directRoomKey) {
         return chatRoomRepository.findByDirectRoomKey(directRoomKey);
     }

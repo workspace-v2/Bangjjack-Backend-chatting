@@ -39,11 +39,9 @@ reviews:
       instructions: "장애/경계 상황을 실제로 검증하는지, 검증 없이 통과하는 테스트가 없는지 확인한다."
   auto_review:
     enabled: true
-    auto_incremental_review: true
+    auto_incremental_review: false
     drafts: false                  # 작성 중인 PR은 준비 완료 후 리뷰
     ignore_title_keywords:
       - "[Release]"
     base_branches:
       - "dev"
-    ignore_title_keywords:
-      - "[Release]"

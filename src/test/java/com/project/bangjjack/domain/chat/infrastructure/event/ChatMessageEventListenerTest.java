@@ -44,7 +44,7 @@ class ChatMessageEventListenerTest {
         }).when(publisher).publish(eq(10L), any());
         ChatMessageEventListener listener = new ChatMessageEventListener(publisher, executor);
         ChatMessageBroadcast broadcast = new ChatMessageBroadcast(
-                WebSocketBroadcastType.CHAT_MESSAGE, 100L, 10L, 2L, "안녕하세요",
+                WebSocketBroadcastType.CHAT_MESSAGE, 100L, 10L, 1L, 2L, "안녕하세요",
                 MessageType.USER, null, LocalDateTime.of(2026, 11, 2, 12, 0));
 
         long start = System.nanoTime();
