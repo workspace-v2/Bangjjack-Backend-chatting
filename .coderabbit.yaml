@@ -22,3 +22,5 @@ reviews:
     enabled: true
     base_branches:
       - "dev"
+    ignore_title_keywords:
+      - "[Release]"
