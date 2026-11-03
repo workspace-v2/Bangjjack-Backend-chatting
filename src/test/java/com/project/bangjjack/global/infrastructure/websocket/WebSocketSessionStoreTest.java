@@ -78,4 +78,40 @@ class WebSocketSessionStoreTest {
         assertThat(store.getAllSessions()).isEmpty();
         assertThat(store.getSubscribedRoomIds()).isEmpty();
     }
+
+    @Test
+    @DisplayName("클라이언트가 해제한 방은 복구용 구독에서 건너뛰고, 다시 SUBSCRIBE 하면 기록이 지워진다")
+    void clientUnsubscribeIsRespectedByRecovery() {
+        WebSocketSessionStore store = new WebSocketSessionStore();
+        WebSocketSession raw = mock(WebSocketSession.class);
+        given(raw.getId()).willReturn("s-1");
+        given(raw.isOpen()).willReturn(true);
+        store.registerGlobal(raw);
+        store.subscribe(1L, raw);
+
+        store.unsubscribeByClient(1L, raw);
+
+        assertThat(store.subscribeIfMissing(1L, raw)).isFalse();
+        assertThat(store.isSubscribed(1L, raw)).isFalse();
+        assertThat(store.subscribeIfMissing(2L, raw)).isTrue(); // 해제하지 않은 방은 복구
+
+        store.subscribe(1L, raw); // 클라이언트가 다시 구독
+        assertThat(store.isUnsubscribedByClient(1L, raw)).isFalse();
+        assertThat(store.isSubscribed(1L, raw)).isTrue();
+    }
+
+    @Test
+    @DisplayName("연결 정리 시 클라이언트 해제 기록도 지운다")
+    void deregisterClearsClientUnsubscribed() {
+        WebSocketSessionStore store = new WebSocketSessionStore();
+        WebSocketSession raw = mock(WebSocketSession.class);
+        given(raw.getId()).willReturn("s-1");
+        given(raw.isOpen()).willReturn(true);
+        store.registerGlobal(raw);
+        store.unsubscribeByClient(1L, raw);
+
+        store.deregisterGlobal(raw);
+
+        assertThat(store.isUnsubscribedByClient(1L, raw)).isFalse();
+    }
 }

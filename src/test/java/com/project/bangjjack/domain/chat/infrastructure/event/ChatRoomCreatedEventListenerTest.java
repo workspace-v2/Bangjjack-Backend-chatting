@@ -47,7 +47,7 @@ class ChatRoomCreatedEventListenerTest {
         given(redisson.getTopic(anyString(), eq(StringCodec.INSTANCE))).willReturn(topic);
         doAnswer(inv -> {
             ((Runnable) inv.getArgument(1)).run();
-            return null;
+            return true;
         }).when(executor).execute(anyLong(), any(Runnable.class));
     }
 
@@ -94,5 +94,24 @@ class ChatRoomCreatedEventListenerTest {
         verify(topic, times(3)).publish(any());
         verify(scheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
         assertThat(meterRegistry.counter("chat.pubsub.room-created.retry.exhausted").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("발행 대기열 초과로 버려져도 재시도를 예약하고, 다음 시도에서 발행한다")
+    void retriesWhenRejectedByQueue() {
+        doAnswer(inv -> false) // 첫 제출은 대기열 초과
+                .doAnswer(inv -> {
+                    ((Runnable) inv.getArgument(1)).run();
+                    return true;
+                })
+                .when(executor).execute(anyLong(), any(Runnable.class));
+
+        listener.handle(EVENT);
+        verify(topic, never()).publish(any());
+        runScheduled();
+
+        ArgumentCaptor<Object> json = ArgumentCaptor.forClass(Object.class);
+        verify(topic).publish(json.capture());
+        assertThat((String) json.getValue()).contains("\"delayed\":true");
     }
 }

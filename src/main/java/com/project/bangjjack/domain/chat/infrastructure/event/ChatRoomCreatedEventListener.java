@@ -68,7 +68,11 @@ public class ChatRoomCreatedEventListener {
     }
 
     private void submit(ChatRoomCreatedEvent event, int attempt) {
-        publishExecutor.execute(event.roomId(), () -> publish(event, attempt));
+        boolean accepted = publishExecutor.execute(event.roomId(), () -> publish(event, attempt));
+        if (!accepted) {
+            // 대기열 초과로 버려지면 publish 가 실행되지 않아 재시도도 예약되지 않으므로 여기서 예약한다
+            scheduleRetry(event, attempt, "발행 대기열 초과");
+        }
     }
 
     private void publish(ChatRoomCreatedEvent event, int attempt) {
@@ -78,13 +82,17 @@ public class ChatRoomCreatedEventListener {
             topic.publish(json);
             log.debug("[Redis Pub/Sub] 채팅방 생성 이벤트 발행 - roomId={}, attempt={}", event.roomId(), attempt);
         } catch (Exception e) {
-            if (attempt >= maxRetries) {
-                retryExhaustedCounter.increment();
-                log.error("[Redis Pub/Sub] 채팅방 생성 이벤트 발행 포기 - roomId={}, attempts={}, 원인={}", event.roomId(), attempt + 1, e.getMessage());
-                return;
-            }
-            log.warn("[Redis Pub/Sub] 채팅방 생성 이벤트 발행 실패, 재시도 예약 - roomId={}, attempt={}, 원인={}", event.roomId(), attempt, e.getMessage());
-            taskScheduler.schedule(() -> submit(event.asDelayed(), attempt + 1), Instant.now().plus(retryInterval));
+            scheduleRetry(event, attempt, e.getMessage());
         }
+    }
+
+    private void scheduleRetry(ChatRoomCreatedEvent event, int attempt, String reason) {
+        if (attempt >= maxRetries) {
+            retryExhaustedCounter.increment();
+            log.error("[Redis Pub/Sub] 채팅방 생성 이벤트 발행 포기 - roomId={}, attempts={}, 원인={}", event.roomId(), attempt + 1, reason);
+            return;
+        }
+        log.warn("[Redis Pub/Sub] 채팅방 생성 이벤트 발행 실패, 재시도 예약 - roomId={}, attempt={}, 원인={}", event.roomId(), attempt, reason);
+        taskScheduler.schedule(() -> submit(event.asDelayed(), attempt + 1), Instant.now().plus(retryInterval));
     }
 }

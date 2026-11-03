@@ -86,7 +86,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     log.debug("[WS] 구독 등록 완료 - userId={}, roomId={}", principal.getMemberId(), inbound.roomId());
                 }
                 case UNSUBSCRIBE -> {
-                    sessionStore.unsubscribe(inbound.roomId(), session);
+                    sessionStore.unsubscribeByClient(inbound.roomId(), session);
                     log.debug("[WS] 구독 해제 - userId={}, roomId={}", principal.getMemberId(), inbound.roomId());
                 }
                 case SEND -> observe("chat.message.send", principal.getMemberId(), inbound.roomId(), () -> {
