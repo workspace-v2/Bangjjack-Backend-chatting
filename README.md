@@ -43,11 +43,14 @@ WebSocket 연결 시 DB에서 참여 방 목록을 조회해 초기 구독합니
 Redis 연결이 끊긴 동안 발행된 방 생성 이벤트는 다시 전달되지 않으므로 다음 두 경로로 복구합니다.
 - 수신 쪽: 방 생성 채널이 재구독되면(`onSubscribe`) 로컬 세션의 참여 방을 DB에서 다시 조회해 빠진 방을 구독하고,
   새로 구독한 방에 `SYNC_REQUIRED`를 보내 끊긴 동안의 메시지를 동기화 API로 받게 합니다 (`chat.ws.room-subscription.recovered`).
-  클라이언트가 `UNSUBSCRIBE`로 직접 해제한 방은 다시 구독하지 않으며, 참여 방 조회에 실패한 사용자는
+  재동기화 신호 전송에 실패하면 연결을 닫아 클라이언트 재연결(DB 기준 초기 구독 + 동기화)로 복구합니다.
+  클라이언트가 `UNSUBSCRIBE`로 직접 해제한 방(실제로 구독 중이던 방만 기록)은 다시 구독하지 않으며, 참여 방 조회에 실패한 사용자는
   `chat.ws.room-subscription.recovery-retry-delay-ms`(기본 5000) 간격으로 최대 `recovery-max-retries`(기본 5)회 다시 복구합니다
   (한도 초과 `chat.ws.room-subscription.recovery.failed`).
 - 발행 쪽: 이 서버의 Redis 연결이 끊겨 발행에 실패하면 다른 서버는 재구독이 일어나지 않아 알 수 없으므로,
   발행 대기열 초과로 버려진 경우도 포함해 `chat.pubsub.room-created.retry-interval-ms`(기본 5000) 간격으로, 첫 실패부터 `chat.pubsub.room-created.retry-for-ms`(기본 180000 = 3분) 동안 다시 발행합니다.
   3분은 측정한 Redis 최대 다운 시간(약 2.5분)보다 긴 값이며, 더 긴 장애는 클라이언트 재연결 시 DB 기준 초기 구독으로 복구됩니다.
   재발행 이벤트는 `delayed`로 표시해 수신 서버가 새로 구독한 세션에 `SYNC_REQUIRED`를 보냅니다 (한도 초과 `chat.pubsub.room-created.retry.exhausted`).
+- 알려진 한계: 발행 서버의 Redis 장애가 재발행 기간(3분)보다 길면 방 생성 이벤트는 버려지고,
+  다른 서버의 참여자는 재연결(또는 클라이언트의 `SUBSCRIBE`) 전까지 새 방에 구독되지 않습니다.
 - `delayed`는 false일 때 JSON에서 빠지므로 일반 이벤트 형식은 이전 버전과 같습니다.

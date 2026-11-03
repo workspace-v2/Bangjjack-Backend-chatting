@@ -61,12 +61,17 @@ public class WebSocketSessionStore {
         if (unsubscribed != null) unsubscribed.remove(roomId);
     }
 
-    /** 클라이언트 UNSUBSCRIBE 요청. 구독을 해제하고, 구독 복구가 이 방을 다시 등록하지 않도록 기록한다. */
+    /**
+     * 클라이언트 UNSUBSCRIBE 요청. 구독을 해제하고, 구독 복구가 이 방을 다시 등록하지 않도록 기록한다.
+     * 실제로 구독 중이던 방만 기록한다. 구독은 참여 검증(SUBSCRIBE)이나 DB 참여 목록으로만 생기므로
+     * 기록 크기는 참여 방 수로 제한된다 (임의 roomId 를 반복 전송해 기록을 키우지 못함).
+     */
     public synchronized void unsubscribeByClient(Long roomId, WebSocketSession session) {
-        unsubscribe(roomId, session);
-        if (activeSessions.containsKey(session.getId())) {
-            clientUnsubscribedRooms.computeIfAbsent(session.getId(), k -> ConcurrentHashMap.newKeySet()).add(roomId);
+        if (!activeSessions.containsKey(session.getId()) || !isSubscribed(roomId, session)) {
+            return;
         }
+        unsubscribe(roomId, session);
+        clientUnsubscribedRooms.computeIfAbsent(session.getId(), k -> ConcurrentHashMap.newKeySet()).add(roomId);
     }
 
     /**

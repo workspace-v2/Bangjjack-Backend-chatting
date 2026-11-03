@@ -8,6 +8,7 @@ import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -16,6 +17,8 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -40,6 +43,25 @@ class WebSocketBroadcasterTest {
 
         assertSyncRequired(inRoom1, 1L);
         assertSyncRequired(inRoom2, 2L);
+    }
+
+    @Test
+    @DisplayName("세션 단위 재동기화 신호를 보내고 true 를 반환한다")
+    void sendSyncRequired_success() throws Exception {
+        WebSocketSession session = openSession();
+
+        assertThat(broadcaster.sendSyncRequired(session, 7L)).isTrue();
+        assertSyncRequired(session, 7L);
+    }
+
+    @Test
+    @DisplayName("재동기화 신호 전송이 실패하면 연결을 닫고 false 를 반환한다 (재연결로 초기 구독·동기화)")
+    void sendSyncRequired_failureClosesSession() throws Exception {
+        WebSocketSession session = openSession();
+        doThrow(new java.io.IOException("broken pipe")).when(session).sendMessage(any());
+
+        assertThat(broadcaster.sendSyncRequired(session, 7L)).isFalse();
+        verify(session).close(CloseStatus.SESSION_NOT_RELIABLE);
     }
 
     private WebSocketSession openSession() {

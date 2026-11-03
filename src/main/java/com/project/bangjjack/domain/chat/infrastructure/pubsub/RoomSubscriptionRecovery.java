@@ -138,8 +138,10 @@ public class RoomSubscriptionRecovery {
                     if (!sessionStore.subscribeIfMissing(roomId, session)) {
                         continue; // 이미 구독 중, 클라이언트가 해제한 방, 또는 그 사이 연결 종료
                     }
-                    chatBroadcaster.sendSyncRequired(session, roomId);
                     recovered++;
+                    if (!chatBroadcaster.sendSyncRequired(session, roomId)) {
+                        break; // 신호 전송 실패로 연결이 닫힘 → 재연결 시 초기 구독·동기화로 복구
+                    }
                     log.debug("[WS] 놓친 방 구독 복구 - userId={}, roomId={}, sessionId={}", entry.getKey(), roomId, session.getId());
                 }
             }

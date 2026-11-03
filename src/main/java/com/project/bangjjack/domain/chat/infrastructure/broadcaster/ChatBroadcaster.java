@@ -16,6 +16,11 @@ public interface ChatBroadcaster {
     /** 이 서버에 연결된 모든 방의 세션에 재동기화 신호를 보낸다. */
     void broadcastSyncRequired();
 
-    /** 한 세션에 특정 방의 재동기화 신호를 보낸다. */
-    void sendSyncRequired(WebSocketSession session, Long roomId);
+    /**
+     * 한 세션에 특정 방의 재동기화 신호를 보낸다.
+     * 전송에 실패하면 그 연결은 더 믿을 수 없으므로 닫는다. 클라이언트는 재연결하면서 DB 기준으로 다시 구독하고 동기화한다.
+     *
+     * @return 전송했으면 true, 실패해 연결을 닫았으면 false
+     */
+    boolean sendSyncRequired(WebSocketSession session, Long roomId);
 }

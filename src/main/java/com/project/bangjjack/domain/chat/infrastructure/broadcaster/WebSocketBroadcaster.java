@@ -10,6 +10,7 @@ import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -52,12 +53,25 @@ public class WebSocketBroadcaster implements ChatBroadcaster {
     }
 
     @Override
-    public void sendSyncRequired(WebSocketSession session, Long roomId) {
-        if (!session.isOpen()) return;
+    public boolean sendSyncRequired(WebSocketSession session, Long roomId) {
+        if (!session.isOpen()) return false;
         try {
             session.sendMessage(new TextMessage(jsonSerializer.serialize(SyncRequiredBroadcast.of(roomId))));
+            return true;
         } catch (Exception e) {
-            log.warn("[WS Broadcast] 재동기화 신호 전송 실패 - sessionId={}, roomId={}, 원인={}", session.getId(), roomId, e.getMessage());
+            // 구독은 이미 등록돼 다음 복구가 이 방을 건너뛰므로, 신호를 잃은 채 연결을 유지하지 않는다.
+            // 연결을 닫으면 클라이언트가 재연결하며 DB 기준 초기 구독과 동기화로 놓친 메시지를 받는다.
+            log.warn("[WS Broadcast] 재동기화 신호 전송 실패, 연결 종료 - sessionId={}, roomId={}, 원인={}", session.getId(), roomId, e.getMessage());
+            closeQuietly(session);
+            return false;
+        }
+    }
+
+    private void closeQuietly(WebSocketSession session) {
+        try {
+            session.close(CloseStatus.SESSION_NOT_RELIABLE);
+        } catch (Exception closeError) {
+            log.debug("[WS Broadcast] 연결 종료 실패 - sessionId={}, 원인={}", session.getId(), closeError.getMessage());
         }
     }
 

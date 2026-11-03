@@ -6,6 +6,7 @@ import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionSto
 import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.WebSocketSession;
@@ -34,6 +35,11 @@ class RoomSubscriptionRecoveryTest {
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final RoomSubscriptionRecovery recovery =
             new RoomSubscriptionRecovery(store, chatRoomUseCase, broadcaster, meterRegistry, 50, 2);
+
+    @BeforeEach
+    void setUp() {
+        given(broadcaster.sendSyncRequired(any(), any())).willReturn(true);
+    }
 
     @AfterEach
     void tearDown() {
@@ -163,5 +169,17 @@ class RoomSubscriptionRecoveryTest {
 
         assertThat(recovery.recover(Set.of(1L)).recovered()).isZero();
         verify(broadcaster, never()).sendSyncRequired(any(), any());
+    }
+
+    @Test
+    @DisplayName("재동기화 신호 전송에 실패하면(연결 종료됨) 그 세션의 나머지 방은 건너뛴다")
+    void stopsForSessionWhenSyncSignalFails() {
+        WebSocketSession session = session("s-1", 1L, true);
+        given(chatRoomUseCase.getMyRoomIds(1L)).willReturn(List.of(20L, 30L));
+        given(broadcaster.sendSyncRequired(any(), any())).willReturn(false);
+
+        recovery.recover(null);
+
+        verify(broadcaster, times(1)).sendSyncRequired(any(), any());
     }
 }

@@ -108,10 +108,29 @@ class WebSocketSessionStoreTest {
         given(raw.getId()).willReturn("s-1");
         given(raw.isOpen()).willReturn(true);
         store.registerGlobal(raw);
+        store.subscribe(1L, raw);
         store.unsubscribeByClient(1L, raw);
+        assertThat(store.isUnsubscribedByClient(1L, raw)).isTrue();
 
         store.deregisterGlobal(raw);
 
         assertThat(store.isUnsubscribedByClient(1L, raw)).isFalse();
+    }
+
+    @Test
+    @DisplayName("구독하지 않은 방의 UNSUBSCRIBE 는 기록하지 않는다 (임의 roomId 반복으로 기록이 커지지 않음)")
+    void unsubscribeOfNotSubscribedRoomIsNotRecorded() {
+        WebSocketSessionStore store = new WebSocketSessionStore();
+        WebSocketSession raw = mock(WebSocketSession.class);
+        given(raw.getId()).willReturn("s-1");
+        given(raw.isOpen()).willReturn(true);
+        store.registerGlobal(raw);
+
+        for (long roomId = 1; roomId <= 1000; roomId++) {
+            store.unsubscribeByClient(roomId, raw);
+        }
+
+        assertThat(store.isUnsubscribedByClient(1L, raw)).isFalse();
+        assertThat(store.isUnsubscribedByClient(1000L, raw)).isFalse();
     }
 }
