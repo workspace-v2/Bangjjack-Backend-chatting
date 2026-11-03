@@ -39,8 +39,9 @@ class ChatRoomCreatedEventListenerTest {
     private final PubSubPublishExecutor executor = mock(PubSubPublishExecutor.class);
     private final TaskScheduler scheduler = mock(TaskScheduler.class);
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    // 재시도 간격 5초, 재시도 기간 3분
     private final ChatRoomCreatedEventListener listener = new ChatRoomCreatedEventListener(
-            redisson, new JsonSerializer(new ObjectMapper()), executor, scheduler, meterRegistry, 5000, 2);
+            redisson, new JsonSerializer(new ObjectMapper()), executor, scheduler, meterRegistry, 5000, 180_000);
 
     @BeforeEach
     void setUp() {
@@ -83,17 +84,40 @@ class ChatRoomCreatedEventListenerTest {
     }
 
     @Test
-    @DisplayName("재시도 한도를 넘으면 포기하고 메트릭을 올린다")
-    void givesUpAfterMaxRetries() {
+    @DisplayName("다음 재시도가 재시도 기간을 넘으면 포기하고 메트릭을 올린다")
+    void givesUpWhenRetryPeriodExceeded() {
+        // 재시도 기간(3초)이 간격(5초)보다 짧으면 첫 실패에서 바로 포기
+        ChatRoomCreatedEventListener shortPeriod = new ChatRoomCreatedEventListener(
+                redisson, new JsonSerializer(new ObjectMapper()), executor, scheduler, meterRegistry, 5000, 3000);
         given(topic.publish(any())).willThrow(new RuntimeException("redis down"));
 
-        listener.handle(EVENT); // attempt 0
-        runScheduled();         // attempt 1
-        runScheduled();         // attempt 2 = max → 포기
+        shortPeriod.handle(EVENT);
 
-        verify(topic, times(3)).publish(any());
-        verify(scheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
+        verify(topic, times(1)).publish(any());
+        verify(scheduler, never()).schedule(any(Runnable.class), any(Instant.class));
         assertThat(meterRegistry.counter("chat.pubsub.room-created.retry.exhausted").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("재시도 기간은 첫 실패 시각 기준이라, 재시도할 때마다 늘어나지 않는다")
+    void retryDeadlineIsFixedAtFirstFailure() {
+        given(topic.publish(any())).willThrow(new RuntimeException("redis down"));
+
+        listener.handle(EVENT);
+        Instant firstSchedule = captureLastSchedule();
+        runScheduled();
+        Instant secondSchedule = captureLastSchedule();
+
+        // 두 번째 예약도 첫 실패 + 3분 안쪽
+        assertThat(secondSchedule).isAfterOrEqualTo(firstSchedule);
+        assertThat(secondSchedule).isBefore(firstSchedule.plusSeconds(180));
+        verify(scheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
+    }
+
+    private Instant captureLastSchedule() {
+        ArgumentCaptor<Instant> captor = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduler, org.mockito.Mockito.atLeastOnce()).schedule(any(Runnable.class), captor.capture());
+        return captor.getValue();
     }
 
     @Test
