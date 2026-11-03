@@ -17,7 +17,7 @@ import java.util.Map;
 
 /**
  * 세션 레지스트리 유지 작업.
- * - heartbeat: 이 서버가 살아 있음을 알리고 로컬 세션을 레지스트리에 다시 기록 (기본 10초, TTL 30초)
+ * - heartbeat: 이 서버가 살아 있음을 알리고 레지스트리를 로컬 세션과 맞춤 (기본 10초, TTL 30초)
  * - sweep: heartbeat 가 만료된 서버(강제 종료된 태스크)의 세션을 정리 (기본 15초)
  * 태스크가 강제 종료되면 afterConnectionClosed 가 호출되지 않아 세션이 레지스트리에 남는다. sweep 이 그것을 지운다.
  */
@@ -28,10 +28,12 @@ public class WebSocketRegistryMaintainer {
 
     static final String ZOMBIE_CLEANED_METRIC = "chat.ws.registry.zombie.cleaned";
     static final String LOCAL_SESSIONS_METRIC = "chat.ws.sessions.local";
+    static final String STALE_REMOVED_METRIC = "chat.ws.registry.stale.removed";
 
     private final WebSocketSessionRegistry registry;
     private final WebSocketSessionStore sessionStore;
     private final Counter zombieCleaned;
+    private final Counter staleRemoved;
 
     public WebSocketRegistryMaintainer(WebSocketSessionRegistry registry, WebSocketSessionStore sessionStore,
                                        MeterRegistry meterRegistry) {
@@ -39,6 +41,9 @@ public class WebSocketRegistryMaintainer {
         this.sessionStore = sessionStore;
         this.zombieCleaned = Counter.builder(ZOMBIE_CLEANED_METRIC)
                 .description("죽은 서버에 남아 있다가 정리된 WebSocket 세션 수")
+                .register(meterRegistry);
+        this.staleRemoved = Counter.builder(STALE_REMOVED_METRIC)
+                .description("heartbeat 대조로 제거한, 로컬에 없는데 레지스트리에 남아 있던 이 서버의 세션 수")
                 .register(meterRegistry);
         Gauge.builder(LOCAL_SESSIONS_METRIC, sessionStore, s -> s.getAllSessions().size())
                 .description("이 서버에 연결된 WebSocket 세션 수")
@@ -48,7 +53,10 @@ public class WebSocketRegistryMaintainer {
     @Scheduled(fixedDelayString = "${chat.ws.server-heartbeat-interval-ms:10000}")
     public void heartbeat() {
         try {
-            registry.heartbeat(localSessions());
+            int stale = registry.heartbeat(this::localSessions);
+            if (stale > 0) {
+                staleRemoved.increment(stale);
+            }
         } catch (Exception e) {
             log.warn("[WS Registry] heartbeat 실패 - 원인={}", e.getMessage());
         }

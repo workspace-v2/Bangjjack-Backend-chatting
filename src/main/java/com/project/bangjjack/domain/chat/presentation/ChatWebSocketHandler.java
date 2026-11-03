@@ -135,7 +135,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         try {
-            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(error)));
+            // 브로드캐스트·ping 과 같은 연결에 동시에 쓰지 않도록 저장소의 공용 전송 데코레이터로 보낸다
+            sessionStore.getById(session.getId()).orElse(session)
+                    .sendMessage(new TextMessage(objectMapper.writeValueAsString(error)));
         } catch (Exception ex) {
             log.warn("[WS] 에러 응답 전송 실패 - sessionId={}, 원인={}", session.getId(), ex.getMessage());
         }

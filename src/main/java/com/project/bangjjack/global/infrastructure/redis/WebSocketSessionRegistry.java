@@ -11,9 +11,11 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * 다중 서버 공용 WebSocket 세션 레지스트리 (Redis).
@@ -85,15 +87,45 @@ public class WebSocketSessionRegistry {
     }
 
     /**
-     * heartbeat 갱신 + 이 서버의 로컬 세션을 레지스트리에 다시 기록한다 (멱등).
-     * Redis 장애 등으로 heartbeat 가 만료돼 다른 서버가 이 서버 세션을 정리했더라도 다음 갱신에서 복구된다.
+     * heartbeat 갱신 + 이 서버의 레지스트리 항목을 로컬 세션과 맞춘다 (reconcile).
+     * - 로컬에 있는데 레지스트리에 없는 세션 → 다시 기록 (Redis 장애로 heartbeat 가 만료돼 다른 서버가 정리한 경우 복구)
+     * - 레지스트리에 있는데 로컬에 없는 세션 → 제거 (종료 시 Redis 제거 실패, 종료와 heartbeat 재기록이 겹친 경우)
+     *
+     * 순서: 레지스트리를 먼저 읽고 로컬 스냅샷을 나중에 뜬다. 새 연결은 로컬 등록 → 레지스트리 등록 순서라,
+     * 레지스트리에서 읽힌 세션은 반드시 로컬 스냅샷에도 있어 새 연결을 잘못 지우지 않는다.
+     * 종료가 스냅샷 직후에 일어나면 이번 갱신이 다시 기록할 수 있지만 다음 갱신에서 제거된다 (최대 한 주기).
+     *
+     * @param localSnapshot 레지스트리를 읽은 뒤 호출되는 로컬 세션 스냅샷 (sessionId → userId)
+     * @return 제거한 불일치 항목 수
      */
-    public void heartbeat(Map<String, Long> localSessions) {
+    public int heartbeat(Supplier<Map<String, Long>> localSnapshot) {
+        Set<String> registered = redissonClient.<String>getSet(SERVER_SESSIONS_PREFIX + serverId, StringCodec.INSTANCE).readAll();
+        Map<String, Long> local = localSnapshot.get();
+        Set<String> localEntries = new HashSet<>();
+        local.forEach((sessionId, userId) -> localEntries.add(entry(userId, sessionId)));
+
         RBatch batch = redissonClient.createBatch();
         batch.getBucket(ALIVE_PREFIX + serverId, StringCodec.INSTANCE).setAsync(serverId, heartbeatTtl);
         batch.getSet(SERVERS_KEY, StringCodec.INSTANCE).addAsync(serverId);
-        localSessions.forEach((sessionId, userId) -> addEntry(batch, userId, sessionId));
+        local.forEach((sessionId, userId) -> addEntry(batch, userId, sessionId));
+        int stale = 0;
+        for (String e : registered) {
+            if (localEntries.contains(e)) {
+                continue;
+            }
+            int sep = e.indexOf(':');
+            if (sep < 0) {
+                continue;
+            }
+            String userId = e.substring(0, sep);
+            String sessionId = e.substring(sep + 1);
+            batch.getSet(SESSION_KEY_PREFIX + userId, StringCodec.INSTANCE).removeAsync(sessionId);
+            batch.getMap(OWNERS_KEY, StringCodec.INSTANCE).fastRemoveAsync(sessionId);
+            batch.getSet(SERVER_SESSIONS_PREFIX + serverId, StringCodec.INSTANCE).removeAsync(e);
+            stale++;
+        }
         batch.execute();
+        return stale;
     }
 
     /**
