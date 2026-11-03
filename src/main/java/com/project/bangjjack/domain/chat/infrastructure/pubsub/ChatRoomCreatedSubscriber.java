@@ -45,7 +45,7 @@ public class ChatRoomCreatedSubscriber {
 
     /**
      * 이벤트의 참여자 정보와 로컬 연결만으로 구독한다. Redis 레지스트리 장애나 원격 세션 상태가
-     * 로컬 구독에 영향을 주지 않도록 하며, 죽은 서버의 세션 정리는 주기적 sweep 에 맡긴다.
+     * 로컬 구독에 영향을 주지 않도록 한다. 연결 종료와 서버 종료 시 세션은 로컬에서 정리된다.
      */
     void subscribeActiveSessions(ChatRoomCreatedEvent event) {
         Long roomId = event.roomId();

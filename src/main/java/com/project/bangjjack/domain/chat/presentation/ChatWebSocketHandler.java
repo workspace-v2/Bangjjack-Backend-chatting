@@ -10,7 +10,6 @@ import com.project.bangjjack.domain.chat.application.exception.NotSubscribedExce
 import com.project.bangjjack.domain.chat.application.usecase.ChatMessageUseCase;
 import com.project.bangjjack.domain.chat.application.usecase.ChatRoomUseCase;
 import com.project.bangjjack.global.common.exception.ApplicationException;
-import com.project.bangjjack.global.infrastructure.redis.WebSocketSessionRegistry;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
 import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
 import io.micrometer.observation.Observation;
@@ -34,7 +33,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ChatMessageUseCase chatMessageUseCase;
     private final ChatRoomUseCase chatRoomUseCase;
     private final WebSocketSessionStore sessionStore;
-    private final WebSocketSessionRegistry sessionRegistry;
     private final ObjectMapper objectMapper;
     private final ObservationRegistry observationRegistry;
 
@@ -50,7 +48,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         Long userId = principal.getMemberId();
         WebSocketKeepAlive.markAlive(session);
         sessionStore.registerGlobal(session);
-        sessionRegistry.register(userId, session.getId());
         try {
             List<Long> roomIds = chatRoomUseCase.getMyRoomIds(userId);
             roomIds.forEach(roomId -> sessionStore.subscribe(roomId, session));
@@ -167,20 +164,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         cleanup(session);
     }
 
-    private void cleanup(WebSocketSession session) {
+    void cleanup(WebSocketSession session) {
         sessionStore.removeAll(session);
         sessionStore.deregisterGlobal(session);
-        MemberPrincipal principal = getPrincipal(session);
-        if (principal == null) {
-            return;
-        }
-        try {
-            sessionRegistry.remove(principal.getMemberId(), session.getId());
-        } catch (Exception e) {
-            // Redis 장애 시에도 로컬 정리는 끝낸다. 레지스트리에 남은 항목은 heartbeat 재기록 대상에서 빠지고,
-            // 새 방 생성 시 로컬에 없는 세션은 무시된다.
-            log.warn("[WS] 세션 레지스트리 제거 실패 - sessionId={}, 원인={}", session.getId(), e.getMessage());
-        }
     }
 
     @Override

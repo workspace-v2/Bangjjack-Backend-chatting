@@ -2,6 +2,7 @@ package com.project.bangjjack.domain.chat.presentation;
 
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,7 @@ import org.springframework.web.socket.WebSocketSession;
 public class WebSocketKeepAlive {
 
     static final String LAST_PONG_ATTR = "ws.lastPongAt";
+    static final String LOCAL_SESSIONS_METRIC = "chat.ws.sessions.local";
     static final String PONG_TIMEOUT_METRIC = "chat.ws.pong.timeout.closed";
 
     private final WebSocketSessionStore sessionStore;
@@ -31,6 +33,9 @@ public class WebSocketKeepAlive {
     public WebSocketKeepAlive(WebSocketSessionStore sessionStore, ChatWebSocketHandler handler, MeterRegistry meterRegistry,
                               @Value("${chat.ws.pong-timeout-ms:60000}") long pongTimeoutMs) {
         this.sessionStore = sessionStore;
+        Gauge.builder(LOCAL_SESSIONS_METRIC, sessionStore, s -> s.getAllSessions().size())
+                .description("이 서버에 연결된 WebSocket 세션 수")
+                .register(meterRegistry);
         this.handler = handler;
         this.pongTimeoutMs = pongTimeoutMs;
         this.timeoutClosed = Counter.builder(PONG_TIMEOUT_METRIC)
@@ -42,11 +47,12 @@ public class WebSocketKeepAlive {
         session.getAttributes().put(LAST_PONG_ATTR, System.currentTimeMillis());
     }
 
-    @Scheduled(fixedDelayString = "${chat.ws.ping-interval-ms:20000}")
+    @Scheduled(scheduler = "webSocketKeepAliveScheduler", fixedDelayString = "${chat.ws.ping-interval-ms:20000}")
     public void pingAll() {
         long now = System.currentTimeMillis();
         for (WebSocketSession session : sessionStore.getAllSessions()) {
             if (!session.isOpen()) {
+                handler.cleanup(session);
                 continue;
             }
             Object last = session.getAttributes().get(LAST_PONG_ATTR);

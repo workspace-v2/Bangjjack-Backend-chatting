@@ -56,4 +56,16 @@ class WebSocketKeepAliveTest {
         then(handler).should().closeUnresponsive(dead);
         then(dead).should(never()).sendMessage(any());
     }
+    @Test
+    @DisplayName("이미 닫힌 연결도 로컬 저장소에서 정리한다")
+    void closedSessionIsCleanedWithoutPing() throws Exception {
+        WebSocketSession closed = session(5_000);
+        given(closed.isOpen()).willReturn(false);
+        given(store.getAllSessions()).willReturn(List.of(closed));
+
+        keepAlive.pingAll();
+
+        then(handler).should().cleanup(closed);
+        then(closed).should(never()).sendMessage(any());
+    }
 }
