@@ -15,6 +15,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -58,8 +60,9 @@ class RoomSubscriptionRecoveryTest {
 
         assertThat(recovered).isEqualTo(1);
         assertThat(store.isSubscribed(20L, session)).isTrue();
-        verify(broadcaster).sendSyncRequired(session, 20L);
-        verify(broadcaster, never()).sendSyncRequired(session, 10L);
+        // 저장소는 세션을 데코레이터로 감싸서 넘기므로 세션 ID 로 비교한다
+        verify(broadcaster).sendSyncRequired(argThat(s -> s.getId().equals("s-1")), eq(20L));
+        verify(broadcaster, never()).sendSyncRequired(any(), eq(10L));
         assertThat(meterRegistry.counter(RoomSubscriptionRecovery.RECOVERED_METRIC).count()).isEqualTo(1.0);
     }
 

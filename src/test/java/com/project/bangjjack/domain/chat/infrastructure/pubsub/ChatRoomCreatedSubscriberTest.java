@@ -16,6 +16,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -112,7 +114,8 @@ class ChatRoomCreatedSubscriberTest {
         subscriber.subscribeActiveSessions(new ChatRoomCreatedEvent(ROOM_ID, List.of(1L, 2L)).asDelayed());
 
         assertThat(store.isSubscribed(ROOM_ID, newlySubscribed)).isTrue();
-        verify(broadcaster).sendSyncRequired(newlySubscribed, ROOM_ID);
-        verify(broadcaster, never()).sendSyncRequired(alreadySubscribed, ROOM_ID);
+        // 저장소는 세션을 데코레이터로 감싸서 넘기므로 세션 ID 로 비교한다
+        verify(broadcaster).sendSyncRequired(argThat(s -> s.getId().equals("s-2")), eq(ROOM_ID));
+        verify(broadcaster, never()).sendSyncRequired(argThat(s -> s.getId().equals("s-1")), any());
     }
 }
