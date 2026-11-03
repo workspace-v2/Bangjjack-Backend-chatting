@@ -44,8 +44,15 @@ public class ChatRoom extends BaseEntity {
     @Column(name = "last_seq", nullable = false)
     private long lastSeq;
 
+    /**
+     * 이 방의 마지막 메시지 id. 메시지 저장 시 방 락 안에서 lastMessageAt 과 함께 갱신한다.
+     * 채팅방 목록이 방마다 마지막 메시지를 PK 로 바로 찾는 데 쓴다 (메시지 수와 무관한 조회 비용).
+     */
+    @Column(name = "last_message_id")
+    private Long lastMessageId;
+
     public static ChatRoom createDirect(Long createdBy, String directRoomKey) {
-        return new ChatRoom(createdBy, RoomType.DIRECT, RoomStatus.OPEN, directRoomKey, null, ChatRoomCategory.GENERAL, 0L);
+        return new ChatRoom(createdBy, RoomType.DIRECT, RoomStatus.OPEN, directRoomKey, null, ChatRoomCategory.GENERAL, 0L, null);
     }
 
     public static String generateDirectKey(Long userId1, Long userId2) {

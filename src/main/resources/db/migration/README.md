@@ -35,3 +35,21 @@ V3 적용 후 주의:
 - V3 가 실패하면(메타데이터 락 timeout, 비 STRICT sql_mode, NULL 행 존재) 앱이 기동하지 않고 ECS 가 이전 리비전으로 롤백한다.
   ALTER 는 원자적으로 실패하므로 스키마는 V2 상태 그대로다. 원인을 해결한 뒤 재배포한다.
 - 배포 후 확인: `SELECT version, success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1;`, `SHOW COLUMNS FROM chat LIKE 'seq';` (Null = NO)
+
+### chat_room.last_message_id (V4 = expand)
+
+채팅방 목록이 방마다 마지막 메시지를 PK 로 바로 찾도록 `last_message_id` 를 NULL 허용으로 추가하고 백필한다
+(이전 `chat.id IN (SELECT MAX(id) ... GROUP BY room_id)` 는 chat 전체 스캔). NOT NULL 은 걸지 않는다 (메시지 없는 방은 NULL).
+
+롤링 배포 중 구버전 서버가 저장한 메시지는 이 값을 갱신하지 않는다. 구버전 태스크가 모두 내려간 뒤 한 번 더 맞춘다:
+
+```sql
+UPDATE chat_room r
+JOIN (SELECT room_id, MAX(id) AS last_id FROM chat WHERE deleted = FALSE GROUP BY room_id) latest ON latest.room_id = r.id
+SET r.last_message_id = latest.last_id
+WHERE r.last_message_id IS NULL OR r.last_message_id < latest.last_id;
+```
+
+- 배포 후 확인: `SHOW COLUMNS FROM chat_room LIKE 'last_message_id';`, 위 UPDATE 의 변경 행 수 (0 이면 이미 일치)
+- 롤백: 구버전 코드는 이 컬럼을 읽지 않으므로 롤백해도 문제없다. 다시 새 버전으로 올릴 때 위 UPDATE 를 실행한다
+- 메시지 삭제(soft delete) 기능이 생기면 마지막 메시지 삭제 시 이 값을 다시 계산해야 한다 (현재 메시지 삭제 경로 없음)
