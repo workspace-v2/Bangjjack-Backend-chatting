@@ -65,4 +65,5 @@ WHERE r.last_message_id IS NULL OR r.last_message_id < latest.last_id;
   EXPLAIN SELECT * FROM chat WHERE room_id = ? AND id < 9223372036854775807 AND deleted = 0 ORDER BY id DESC LIMIT 31; -- key = IDX_chat_room_deleted_id
   EXPLAIN SELECT * FROM chat_room_participant WHERE user_id = ? AND status = 'ACTIVE' AND deleted = 0;           -- key = IDX_participant_user_status
   ```
-- 옵티마이저가 여전히 PRIMARY 를 고르면 인덱스만으로는 부족하다 → 쿼리 쪽 보완 필요 (이슈에 기록)
+- 메시지 페이지는 인덱스를 추가해도 옵티마이저가 PRIMARY 역방향 스캔을 골랐다 (prefer_ordering_index). 그래서 `ChatRepository` 의
+  메시지 페이지 쿼리 2개가 네이티브 SQL `FORCE INDEX (IDX_chat_room_deleted_id)` 를 쓴다. **이 인덱스 이름을 바꾸거나 지우면 쿼리가 실패한다.**
