@@ -165,7 +165,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     void cleanup(WebSocketSession session) {
-        sessionStore.removeAll(session);
         sessionStore.deregisterGlobal(session);
     }
 

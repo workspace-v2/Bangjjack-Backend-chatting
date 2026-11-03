@@ -17,6 +17,7 @@ class WebSocketSessionStoreTest {
         WebSocketSessionStore store = new WebSocketSessionStore();
         WebSocketSession raw = mock(WebSocketSession.class);
         given(raw.getId()).willReturn("s-1");
+        given(raw.isOpen()).willReturn(true);
 
         store.registerGlobal(raw);
         store.subscribe(1L, raw);
@@ -26,5 +27,55 @@ class WebSocketSessionStoreTest {
         WebSocketSession inRoom2 = store.getSessionsByRoom(2L).iterator().next();
         assertThat(inRoom1).isSameAs(inRoom2).isSameAs(store.getById("s-1").orElseThrow());
         assertThat(store.getAllSessions()).hasSize(1);
+    }
+    @Test
+    @DisplayName("정리 전 얻은 세션으로 뒤늦게 구독해도 전역 등록과 방 구독을 되살리지 않는다")
+    void staleReferenceCannotResubscribeAfterCleanup() {
+        WebSocketSessionStore store = new WebSocketSessionStore();
+        WebSocketSession raw = mock(WebSocketSession.class);
+        given(raw.getId()).willReturn("s-1");
+        given(raw.isOpen()).willReturn(true);
+        store.registerGlobal(raw);
+        store.subscribe(1L, raw);
+        WebSocketSession stale = store.getById("s-1").orElseThrow();
+
+        store.deregisterGlobal(raw);
+        // isOpen 이 아직 true 여도 전역 등록이 끝났다면 구독할 수 없다.
+        store.subscribe(2L, stale);
+
+        assertThat(store.getAllSessions()).isEmpty();
+        assertThat(store.getSubscribedRoomIds()).isEmpty();
+        assertThat(store.isSubscribed(1L, raw)).isFalse();
+        assertThat(store.isSubscribed(2L, raw)).isFalse();
+    }
+
+    @Test
+    @DisplayName("등록된 연결이 닫혔다면 새 방에 구독시키지 않는다")
+    void closedRegisteredSessionCannotSubscribe() {
+        WebSocketSessionStore store = new WebSocketSessionStore();
+        WebSocketSession raw = mock(WebSocketSession.class);
+        given(raw.getId()).willReturn("s-1");
+        given(raw.isOpen()).willReturn(true);
+        store.registerGlobal(raw);
+        given(raw.isOpen()).willReturn(false);
+
+        store.subscribe(1L, raw);
+
+        assertThat(store.getSessionsByRoom(1L)).isEmpty();
+        assertThat(store.isSubscribed(1L, raw)).isFalse();
+    }
+
+    @Test
+    @DisplayName("전역 등록되지 않은 세션은 구독만으로 등록되지 않는다")
+    void unregisteredSessionCannotSubscribe() {
+        WebSocketSessionStore store = new WebSocketSessionStore();
+        WebSocketSession raw = mock(WebSocketSession.class);
+        given(raw.getId()).willReturn("s-1");
+        given(raw.isOpen()).willReturn(true);
+
+        store.subscribe(1L, raw);
+
+        assertThat(store.getAllSessions()).isEmpty();
+        assertThat(store.getSubscribedRoomIds()).isEmpty();
     }
 }
