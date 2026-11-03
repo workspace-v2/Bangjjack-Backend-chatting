@@ -12,7 +12,9 @@ import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.WebSocketSession;
 
+import java.util.Optional;
 import java.util.Set;
 
 @Slf4j
@@ -42,21 +44,27 @@ public class ChatRoomCreatedSubscriber {
         log.info("[Redis Sub] 채팅방 생성 구독 등록 완료 - channel={}", CHANNEL);
     }
 
-    private void subscribeActiveSessions(ChatRoomCreatedEvent event) {
+    /**
+     * 새 방 참여자의 세션 중 이 서버에 연결된 것만 구독시킨다. 다른 서버의 세션은 그 서버가 같은 이벤트를 받아 처리한다.
+     * 로컬에 없는 세션을 "죽은 세션"으로 지우면 다른 서버의 정상 세션까지 지우게 된다 (다중 서버).
+     * 소유 서버의 heartbeat 가 만료된 세션만 정리한다.
+     */
+    void subscribeActiveSessions(ChatRoomCreatedEvent event) {
         Long roomId = event.roomId();
         for (Long userId : event.participantIds()) {
             Set<String> sessionIds = sessionRegistry.getSessionIds(userId);
             for (String sessionId : sessionIds) {
-                sessionStore.getById(sessionId).ifPresentOrElse(
-                        session -> {
-                            sessionStore.subscribe(roomId, session);
-                            log.debug("[WS] 신규 채팅방 동적 구독 - userId={}, roomId={}, sessionId={}", userId, roomId, sessionId);
-                        },
-                        () -> {
-                            sessionRegistry.remove(userId, sessionId);
-                            log.debug("[WS] 스테일 세션 ID 제거 - userId={}, sessionId={}", userId, sessionId);
-                        }
-                );
+                Optional<WebSocketSession> local = sessionStore.getById(sessionId);
+                if (local.isPresent()) {
+                    sessionStore.subscribe(roomId, local.get());
+                    log.debug("[WS] 신규 채팅방 동적 구독 - userId={}, roomId={}, sessionId={}", userId, roomId, sessionId);
+                    continue;
+                }
+                String owner = sessionRegistry.ownerOf(sessionId);
+                if (owner != null && !sessionRegistry.isLocalServer(owner) && !sessionRegistry.isServerAlive(owner)) {
+                    sessionRegistry.remove(userId, sessionId);
+                    log.debug("[WS] 죽은 서버의 세션 제거 - userId={}, sessionId={}, owner={}", userId, sessionId, owner);
+                }
             }
         }
     }
