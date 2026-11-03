@@ -2,8 +2,8 @@ package com.project.bangjjack.domain.chat.infrastructure.pubsub;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bangjjack.domain.chat.application.event.ChatRoomCreatedEvent;
-import com.project.bangjjack.global.infrastructure.redis.WebSocketSessionRegistry;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
+import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,7 +12,9 @@ import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.WebSocketSession;
 
+import java.util.HashSet;
 import java.util.Set;
 
 @Slf4j
@@ -25,7 +27,6 @@ public class ChatRoomCreatedSubscriber {
 
     private final RedissonClient redissonClient;
     private final ObjectMapper objectMapper;
-    private final WebSocketSessionRegistry sessionRegistry;
     private final WebSocketSessionStore sessionStore;
 
     @PostConstruct
@@ -42,22 +43,22 @@ public class ChatRoomCreatedSubscriber {
         log.info("[Redis Sub] 채팅방 생성 구독 등록 완료 - channel={}", CHANNEL);
     }
 
-    private void subscribeActiveSessions(ChatRoomCreatedEvent event) {
+    /**
+     * 이벤트의 참여자 정보와 로컬 연결만으로 구독한다. Redis 레지스트리 장애나 원격 세션 상태가
+     * 로컬 구독에 영향을 주지 않도록 한다. 연결 종료와 서버 종료 시 세션은 로컬에서 정리된다.
+     */
+    void subscribeActiveSessions(ChatRoomCreatedEvent event) {
         Long roomId = event.roomId();
-        for (Long userId : event.participantIds()) {
-            Set<String> sessionIds = sessionRegistry.getSessionIds(userId);
-            for (String sessionId : sessionIds) {
-                sessionStore.getById(sessionId).ifPresentOrElse(
-                        session -> {
-                            sessionStore.subscribe(roomId, session);
-                            log.debug("[WS] 신규 채팅방 동적 구독 - userId={}, roomId={}, sessionId={}", userId, roomId, sessionId);
-                        },
-                        () -> {
-                            sessionRegistry.remove(userId, sessionId);
-                            log.debug("[WS] 스테일 세션 ID 제거 - userId={}, sessionId={}", userId, sessionId);
-                        }
-                );
+        Set<Long> participantIds = new HashSet<>(event.participantIds());
+        for (WebSocketSession session : sessionStore.getAllSessions()) {
+            if (!session.isOpen()
+                    || !(session.getAttributes().get("principal") instanceof MemberPrincipal principal)
+                    || !participantIds.contains(principal.getMemberId())) {
+                continue;
             }
+            sessionStore.subscribe(roomId, session);
+            log.debug("[WS] 신규 채팅방 동적 구독 - userId={}, roomId={}, sessionId={}",
+                    principal.getMemberId(), roomId, session.getId());
         }
     }
 }

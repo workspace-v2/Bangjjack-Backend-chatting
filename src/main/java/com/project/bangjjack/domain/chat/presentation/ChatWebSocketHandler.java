@@ -10,7 +10,6 @@ import com.project.bangjjack.domain.chat.application.exception.NotSubscribedExce
 import com.project.bangjjack.domain.chat.application.usecase.ChatMessageUseCase;
 import com.project.bangjjack.domain.chat.application.usecase.ChatRoomUseCase;
 import com.project.bangjjack.global.common.exception.ApplicationException;
-import com.project.bangjjack.global.infrastructure.redis.WebSocketSessionRegistry;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
 import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
 import io.micrometer.observation.Observation;
@@ -21,6 +20,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.PongMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
@@ -33,7 +33,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ChatMessageUseCase chatMessageUseCase;
     private final ChatRoomUseCase chatRoomUseCase;
     private final WebSocketSessionStore sessionStore;
-    private final WebSocketSessionRegistry sessionRegistry;
     private final ObjectMapper objectMapper;
     private final ObservationRegistry observationRegistry;
 
@@ -47,8 +46,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
 
         Long userId = principal.getMemberId();
+        WebSocketKeepAlive.markAlive(session);
         sessionStore.registerGlobal(session);
-        sessionRegistry.register(userId, session.getId());
         try {
             List<Long> roomIds = chatRoomUseCase.getMyRoomIds(userId);
             roomIds.forEach(roomId -> sessionStore.subscribe(roomId, session));
@@ -133,22 +132,40 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         try {
-            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(error)));
+            // 브로드캐스트·ping 과 같은 연결에 동시에 쓰지 않도록 저장소의 공용 전송 데코레이터로 보낸다
+            sessionStore.getById(session.getId()).orElse(session)
+                    .sendMessage(new TextMessage(objectMapper.writeValueAsString(error)));
         } catch (Exception ex) {
             log.warn("[WS] 에러 응답 전송 실패 - sessionId={}, 원인={}", session.getId(), ex.getMessage());
         }
     }
 
     @Override
+    protected void handlePongMessage(WebSocketSession session, PongMessage message) {
+        WebSocketKeepAlive.markAlive(session);
+    }
+
+    @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        MemberPrincipal principal = getPrincipal(session);
-        if (principal == null) {
-            return;
+        cleanup(session);
+        log.debug("[WS] 연결 해제 - sessionId={}, status={}", session.getId(), status);
+    }
+
+    /**
+     * pong 응답이 없는 연결을 닫고 세션 정보를 지운다.
+     * 끊긴 연결은 close 가 완료되지 않아 afterConnectionClosed 가 늦게 오거나 오지 않을 수 있어 정리를 직접 한다 (멱등).
+     */
+    void closeUnresponsive(WebSocketSession session) {
+        try {
+            session.close(CloseStatus.SESSION_NOT_RELIABLE);
+        } catch (Exception e) {
+            log.debug("[WS] 응답 없는 연결 종료 실패 - sessionId={}, 원인={}", session.getId(), e.getMessage());
         }
-        sessionStore.removeAll(session);
+        cleanup(session);
+    }
+
+    void cleanup(WebSocketSession session) {
         sessionStore.deregisterGlobal(session);
-        sessionRegistry.remove(principal.getMemberId(), session.getId());
-        log.debug("[WS] 연결 해제 - userId={}, sessionId={}, status={}", principal.getMemberId(), session.getId(), status);
     }
 
     @Override
