@@ -29,6 +29,8 @@ public class WebSocketSessionStore {
     private final ConcurrentHashMap<String, Set<Long>> sessionRooms = new ConcurrentHashMap<>();
     // sessionId → decorated session (이 서버의 모든 연결)
     private final ConcurrentHashMap<String, WebSocketSession> activeSessions = new ConcurrentHashMap<>();
+    // sessionId → 클라이언트가 UNSUBSCRIBE 로 직접 해제한 방 (구독 복구가 다시 등록하지 않도록)
+    private final ConcurrentHashMap<String, Set<Long>> clientUnsubscribedRooms = new ConcurrentHashMap<>();
 
     public synchronized void registerGlobal(WebSocketSession session) {
         if (!session.isOpen()) return;
@@ -37,6 +39,7 @@ public class WebSocketSessionStore {
 
     public synchronized void deregisterGlobal(WebSocketSession session) {
         activeSessions.remove(session.getId());
+        clientUnsubscribedRooms.remove(session.getId());
         removeAll(session);
     }
 
@@ -54,6 +57,38 @@ public class WebSocketSessionStore {
         if (decorated == null || !decorated.isOpen()) return;
         roomSessions.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>()).put(session.getId(), decorated);
         sessionRooms.computeIfAbsent(session.getId(), k -> ConcurrentHashMap.newKeySet()).add(roomId);
+        Set<Long> unsubscribed = clientUnsubscribedRooms.get(session.getId());
+        if (unsubscribed != null) unsubscribed.remove(roomId);
+    }
+
+    /**
+     * 클라이언트 UNSUBSCRIBE 요청. 구독을 해제하고, 구독 복구가 이 방을 다시 등록하지 않도록 기록한다.
+     * 실제로 구독 중이던 방만 기록한다. 구독은 참여 검증(SUBSCRIBE)이나 DB 참여 목록으로만 생기므로
+     * 기록 크기는 참여 방 수로 제한된다 (임의 roomId 를 반복 전송해 기록을 키우지 못함).
+     */
+    public synchronized void unsubscribeByClient(Long roomId, WebSocketSession session) {
+        if (!activeSessions.containsKey(session.getId()) || !isSubscribed(roomId, session)) {
+            return;
+        }
+        unsubscribe(roomId, session);
+        clientUnsubscribedRooms.computeIfAbsent(session.getId(), k -> ConcurrentHashMap.newKeySet()).add(roomId);
+    }
+
+    /**
+     * 구독 복구용. 이미 구독 중이거나 클라이언트가 직접 해제한 방이면 건너뛴다.
+     * 확인과 등록을 같은 잠금 안에서 해, 그 사이 들어온 UNSUBSCRIBE 를 덮어쓰지 않는다.
+     *
+     * @return 새로 구독했으면 true
+     */
+    public synchronized boolean subscribeIfMissing(Long roomId, WebSocketSession session) {
+        if (isSubscribed(roomId, session) || isUnsubscribedByClient(roomId, session)) return false;
+        subscribe(roomId, session);
+        return isSubscribed(roomId, session);
+    }
+
+    public boolean isUnsubscribedByClient(Long roomId, WebSocketSession session) {
+        Set<Long> rooms = clientUnsubscribedRooms.get(session.getId());
+        return rooms != null && rooms.contains(roomId);
     }
 
     public synchronized void unsubscribe(Long roomId, WebSocketSession session) {
