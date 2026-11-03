@@ -29,3 +29,9 @@ SELECT COUNT(*) FROM chat WHERE seq IS NULL; -- 롤링 배포 중 구버전이 �
 - 0 이면: `ALTER TABLE chat MODIFY seq BIGINT NOT NULL;` 만 추가하면 된다.
 - 0 이 아니면: 해당 방의 last_seq 뒤에 이어 붙이도록 seq 를 부여하고 last_seq 를 갱신한 뒤 NOT NULL 을 건다
   (부하가 없는 시간에 적용. 동시에 새 메시지가 저장되면 seq 가 충돌할 수 있다).
+
+V3 적용 후 주의:
+- 애플리케이션 롤백은 V2 이상 코드로만 한다. V2 이전 코드는 seq 없이 INSERT 하므로 NOT NULL 에 걸려 전송이 실패한다.
+- V3 가 실패하면(메타데이터 락 timeout, 비 STRICT sql_mode, NULL 행 존재) 앱이 기동하지 않고 ECS 가 이전 리비전으로 롤백한다.
+  ALTER 는 원자적으로 실패하므로 스키마는 V2 상태 그대로다. 원인을 해결한 뒤 재배포한다.
+- 배포 후 확인: `SELECT version, success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1;`, `SHOW COLUMNS FROM chat LIKE 'seq';` (Null = NO)
