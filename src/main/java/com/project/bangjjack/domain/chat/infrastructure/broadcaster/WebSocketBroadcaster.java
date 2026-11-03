@@ -51,6 +51,16 @@ public class WebSocketBroadcaster implements ChatBroadcaster {
         }
     }
 
+    @Override
+    public void sendSyncRequired(WebSocketSession session, Long roomId) {
+        if (!session.isOpen()) return;
+        try {
+            session.sendMessage(new TextMessage(jsonSerializer.serialize(SyncRequiredBroadcast.of(roomId))));
+        } catch (Exception e) {
+            log.warn("[WS Broadcast] 재동기화 신호 전송 실패 - sessionId={}, roomId={}, 원인={}", session.getId(), roomId, e.getMessage());
+        }
+    }
+
     /**
      * 방에 연결된 세션에 전송한다. 전송 대상·성공·실패 세션 수를 span 에 남겨, 수신 서버에서 메시지가 어디까지 전달됐는지 확인한다.
      */

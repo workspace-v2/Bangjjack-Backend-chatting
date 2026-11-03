@@ -2,6 +2,7 @@ package com.project.bangjjack.domain.chat.infrastructure.broadcaster;
 
 import com.project.bangjjack.domain.chat.application.dto.response.ChatMessageBroadcast;
 import com.project.bangjjack.domain.chat.application.dto.response.ReadReceiptBroadcast;
+import org.springframework.web.socket.WebSocketSession;
 
 /**
  * 채팅 브로드캐스트 추상화.
@@ -14,4 +15,7 @@ public interface ChatBroadcaster {
 
     /** 이 서버에 연결된 모든 방의 세션에 재동기화 신호를 보낸다. */
     void broadcastSyncRequired();
+
+    /** 한 세션에 특정 방의 재동기화 신호를 보낸다. */
+    void sendSyncRequired(WebSocketSession session, Long roomId);
 }
