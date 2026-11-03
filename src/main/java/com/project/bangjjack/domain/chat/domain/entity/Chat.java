@@ -10,7 +10,10 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(
     name = "chat",
-    indexes = @Index(name = "IDX_chat_room_id", columnList = "room_id, id"),
+    indexes = {
+        @Index(name = "IDX_chat_room_id", columnList = "room_id, id"),
+        @Index(name = "IDX_chat_room_deleted_id", columnList = "room_id, deleted, id")
+    },
     uniqueConstraints = @UniqueConstraint(name = "UQ_chat_room_seq", columnNames = {"room_id", "seq"})
 )
 @Getter

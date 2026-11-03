@@ -7,6 +7,9 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
+    # 요청 끝(응답 직렬화)까지 DB 커넥션을 붙잡지 않도록 끈다. 조회·지연 로딩은 서비스 트랜잭션 안에서 끝낸다.
+    # (AI 분석 UseCase 는 데이터 로딩 트랜잭션 밖에서 외부 API 를 호출하도록 설계돼 있는데, 켜져 있으면 그동안에도 커넥션을 점유했다)
+    open-in-view: false
     show-sql: true
     properties:
       hibernate:
