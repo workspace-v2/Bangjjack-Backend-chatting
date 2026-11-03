@@ -30,9 +30,10 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
     @Query("SELECT cr FROM ChatRoom cr WHERE cr.id = :id")
     Optional<ChatRoom> findByIdForUpdate(@Param("id") Long id);
 
+    /** 마지막 메시지 id 와 시각을 함께 갱신한다. 메시지 저장 트랜잭션에서 방 락을 잡은 뒤에만 호출한다. */
     @Modifying(flushAutomatically = true)
-    @Query("UPDATE ChatRoom r SET r.lastMessageAt = :sentAt, r.updatedAt = CURRENT_TIMESTAMP WHERE r.id = :roomId")
-    void updateLastMessageAt(@Param("roomId") Long roomId, @Param("sentAt") LocalDateTime sentAt);
+    @Query("UPDATE ChatRoom r SET r.lastMessageId = :messageId, r.lastMessageAt = :sentAt, r.updatedAt = CURRENT_TIMESTAMP WHERE r.id = :roomId")
+    void updateLastMessage(@Param("roomId") Long roomId, @Param("messageId") Long messageId, @Param("sentAt") LocalDateTime sentAt);
 
     @Modifying(flushAutomatically = true)
     @Query("UPDATE ChatRoom r SET r.lastSeq = r.lastSeq + 1, r.updatedAt = CURRENT_TIMESTAMP WHERE r.id = :roomId")
