@@ -82,13 +82,16 @@ public class PubSubPublishExecutor implements DisposableBean {
 
     /**
      * 같은 key 의 작업은 제출 순서대로 실행된다. 호출 스레드는 기다리지 않는다.
+     *
+     * @return 대기열에 들어갔으면 true, 대기열 초과로 버려졌으면 false (버려진 작업을 다시 시도할지는 호출자가 정한다)
      */
-    public void execute(Long key, Runnable task) {
+    public boolean execute(Long key, Runnable task) {
         int laneIndex = Math.floorMod(Objects.hashCode(key), lanes.length);
         Span parent = tracer.currentSpan();
         long enqueuedAtMicros = ChronoUnit.MICROS.between(Instant.EPOCH, Instant.now());
         try {
             lanes[laneIndex].execute(() -> runTraced(key, task, laneIndex, parent, enqueuedAtMicros));
+            return true;
         } catch (RejectedExecutionException e) {
             rejectedCounter.increment();
             if (parent != null) {
@@ -96,6 +99,7 @@ public class PubSubPublishExecutor implements DisposableBean {
                 parent.event("pubsub.publish.rejected");
             }
             log.error("[Redis Pub/Sub] 발행 대기열 초과로 발행을 버림 - key={}", key);
+            return false;
         }
     }
 
