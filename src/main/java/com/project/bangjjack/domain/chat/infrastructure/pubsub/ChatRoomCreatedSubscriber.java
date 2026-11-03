@@ -2,8 +2,8 @@ package com.project.bangjjack.domain.chat.infrastructure.pubsub;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bangjjack.domain.chat.application.event.ChatRoomCreatedEvent;
-import com.project.bangjjack.global.infrastructure.redis.WebSocketSessionRegistry;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
+import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,7 +14,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
 
-import java.util.Optional;
+import java.util.HashSet;
 import java.util.Set;
 
 @Slf4j
@@ -27,7 +27,6 @@ public class ChatRoomCreatedSubscriber {
 
     private final RedissonClient redissonClient;
     private final ObjectMapper objectMapper;
-    private final WebSocketSessionRegistry sessionRegistry;
     private final WebSocketSessionStore sessionStore;
 
     @PostConstruct
@@ -45,27 +44,21 @@ public class ChatRoomCreatedSubscriber {
     }
 
     /**
-     * 새 방 참여자의 세션 중 이 서버에 연결된 것만 구독시킨다. 다른 서버의 세션은 그 서버가 같은 이벤트를 받아 처리한다.
-     * 로컬에 없는 세션을 "죽은 세션"으로 지우면 다른 서버의 정상 세션까지 지우게 된다 (다중 서버).
-     * 소유 서버의 heartbeat 가 만료된 세션만 정리한다.
+     * 이벤트의 참여자 정보와 로컬 연결만으로 구독한다. Redis 레지스트리 장애나 원격 세션 상태가
+     * 로컬 구독에 영향을 주지 않도록 하며, 죽은 서버의 세션 정리는 주기적 sweep 에 맡긴다.
      */
     void subscribeActiveSessions(ChatRoomCreatedEvent event) {
         Long roomId = event.roomId();
-        for (Long userId : event.participantIds()) {
-            Set<String> sessionIds = sessionRegistry.getSessionIds(userId);
-            for (String sessionId : sessionIds) {
-                Optional<WebSocketSession> local = sessionStore.getById(sessionId);
-                if (local.isPresent()) {
-                    sessionStore.subscribe(roomId, local.get());
-                    log.debug("[WS] 신규 채팅방 동적 구독 - userId={}, roomId={}, sessionId={}", userId, roomId, sessionId);
-                    continue;
-                }
-                String owner = sessionRegistry.ownerOf(sessionId);
-                if (owner != null && !sessionRegistry.isLocalServer(owner) && !sessionRegistry.isServerAlive(owner)) {
-                    sessionRegistry.remove(userId, sessionId);
-                    log.debug("[WS] 죽은 서버의 세션 제거 - userId={}, sessionId={}, owner={}", userId, sessionId, owner);
-                }
+        Set<Long> participantIds = new HashSet<>(event.participantIds());
+        for (WebSocketSession session : sessionStore.getAllSessions()) {
+            if (!session.isOpen()
+                    || !(session.getAttributes().get("principal") instanceof MemberPrincipal principal)
+                    || !participantIds.contains(principal.getMemberId())) {
+                continue;
             }
+            sessionStore.subscribe(roomId, session);
+            log.debug("[WS] 신규 채팅방 동적 구독 - userId={}, roomId={}, sessionId={}",
+                    principal.getMemberId(), roomId, session.getId());
         }
     }
 }
