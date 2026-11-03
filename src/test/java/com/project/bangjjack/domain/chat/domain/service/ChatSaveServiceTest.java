@@ -72,6 +72,7 @@ class ChatSaveServiceTest {
         ChatRoom room = mock(ChatRoom.class);
         given(room.getId()).willReturn(ROOM_ID);
         Chat saved = mock(Chat.class);
+        given(saved.getId()).willReturn(200L);
         given(chatRepository.save(any(Chat.class))).willReturn(saved);
 
         assertThat(chatSaveService.saveWithRejoin(SENDER_ID, room, "안녕하세요")).isSameAs(saved);
@@ -80,7 +81,7 @@ class ChatSaveServiceTest {
         order.verify(chatStateUpdateService).prepareUserMessage(ROOM_ID, SENDER_ID);
         order.verify(chatStateUpdateService).nextSeq(ROOM_ID);
         order.verify(chatRepository).save(any(Chat.class));
-        order.verify(chatRoomRepository).updateLastMessage(ROOM_ID, null, null);
+        order.verify(chatRoomRepository).updateLastMessage(ROOM_ID, 200L, null);
         order.verify(chatRoomParticipantRepository).incrementUnreadCountExcludingSender(ROOM_ID, SENDER_ID);
     }
 
