@@ -17,9 +17,10 @@ ECS 롤링 배포 중에는 새 서버가 Flyway 를 실행하는 동안에도 �
 - expand: 새 컬럼은 NULL 허용으로 추가 + 백필. 새 코드는 값을 채워 저장한다.
 - contract: 모든 서버가 새 버전이 된 뒤 다음 배포에서 NULL 정리 + NOT NULL 을 적용한다.
 
-### chat.seq (V2 = expand, 남은 작업 = contract)
+### chat.seq (V2 = expand, V3 = contract)
 
-`V2__add_chat_seq.sql` 은 seq 를 NULL 허용으로 추가했다. contract 마이그레이션 전에 확인:
+`V2__add_chat_seq.sql` 은 seq 를 NULL 허용으로 추가했고, `V3__chat_seq_not_null.sql` 이 NOT NULL 을 적용한다.
+V3 배포 전에 확인 (main/dev 모두 0 확인 후 적용):
 
 ```sql
 SELECT COUNT(*) FROM chat WHERE seq IS NULL; -- 롤링 배포 중 구버전이 저장한 메시지
