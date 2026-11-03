@@ -81,9 +81,10 @@ public class ChatRoomCreatedSubscriber {
                     || !participantIds.contains(principal.getMemberId())) {
                 continue;
             }
-            boolean alreadySubscribed = sessionStore.isSubscribed(roomId, session);
-            sessionStore.subscribe(roomId, session);
-            if (event.delayed() && !alreadySubscribed && sessionStore.isSubscribed(roomId, session)) {
+            if (!sessionStore.subscribeIfMissing(roomId, session)) {
+                continue;
+            }
+            if (event.delayed()) {
                 chatBroadcaster.sendSyncRequired(session, roomId);
             }
             log.debug("[WS] 신규 채팅방 동적 구독 - userId={}, roomId={}, sessionId={}",

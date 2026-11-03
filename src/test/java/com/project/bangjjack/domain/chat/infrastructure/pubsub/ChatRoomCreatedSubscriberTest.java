@@ -105,6 +105,25 @@ class ChatRoomCreatedSubscriberTest {
     }
 
     @Test
+    @DisplayName("구독 해제 후 일반 이벤트나 지연 이벤트가 와도 해제 상태를 유지한다")
+    void roomCreatedEventsPreserveClientUnsubscribe() {
+        WebSocketSession unsubscribed = session("s-1", 1L, true);
+        WebSocketSession otherDevice = session("s-2", 1L, true);
+        store.subscribe(ROOM_ID, unsubscribed);
+        store.unsubscribeByClient(ROOM_ID, unsubscribed);
+        ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L));
+
+        subscriber.subscribeActiveSessions(event.asDelayed());
+        subscriber.subscribeActiveSessions(event);
+
+        assertThat(store.isSubscribed(ROOM_ID, unsubscribed)).isFalse();
+        assertThat(store.isUnsubscribedByClient(ROOM_ID, unsubscribed)).isTrue();
+        assertThat(store.isSubscribed(ROOM_ID, otherDevice)).isTrue();
+        verify(broadcaster, never()).sendSyncRequired(argThat(s -> s.getId().equals("s-1")), any());
+        verify(broadcaster).sendSyncRequired(argThat(s -> s.getId().equals("s-2")), eq(ROOM_ID));
+    }
+
+    @Test
     @DisplayName("재시도로 늦게 온 이벤트는 새로 구독한 세션에만 재동기화 신호를 보낸다")
     void delayedEventSendsSyncRequiredOnlyToNewlySubscribed() {
         WebSocketSession alreadySubscribed = session("s-1", 1L, true);
