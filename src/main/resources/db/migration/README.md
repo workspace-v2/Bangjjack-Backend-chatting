@@ -53,3 +53,16 @@ WHERE r.last_message_id IS NULL OR r.last_message_id < latest.last_id;
 - 배포 후 확인: `SHOW COLUMNS FROM chat_room LIKE 'last_message_id';`, 위 UPDATE 의 변경 행 수 (0 이면 이미 일치)
 - 롤백: 구버전 코드는 이 컬럼을 읽지 않으므로 롤백해도 문제없다. 다시 새 버전으로 올릴 때 위 UPDATE 를 실행한다
 - 메시지 삭제(soft delete) 기능이 생기면 마지막 메시지 삭제 시 이 값을 다시 계산해야 한다 (현재 메시지 삭제 경로 없음)
+
+### 조회 인덱스 (V5)
+
+`IDX_chat_room_deleted_id (room_id, deleted, id)`: 메시지 페이지가 PRIMARY 역방향 스캔 대신 방 단위로 필요한 행만 읽도록.
+`IDX_participant_user_status (user_id, status, deleted)`: 채팅방 목록의 내 참여 방 조회가 참여자 테이블 전체를 읽지 않도록.
+인덱스 추가만이라 구버전과 호환된다. `ALGORITHM=INPLACE, LOCK=NONE` 으로 쓰기를 막지 않고 만든다.
+
+- 배포 후 확인: 실행 계획이 새 인덱스를 쓰는지
+  ```sql
+  EXPLAIN SELECT * FROM chat WHERE room_id = ? AND id < 9223372036854775807 AND deleted = 0 ORDER BY id DESC LIMIT 31; -- key = IDX_chat_room_deleted_id
+  EXPLAIN SELECT * FROM chat_room_participant WHERE user_id = ? AND status = 'ACTIVE' AND deleted = 0;           -- key = IDX_participant_user_status
+  ```
+- 옵티마이저가 여전히 PRIMARY 를 고르면 인덱스만으로는 부족하다 → 쿼리 쪽 보완 필요 (이슈에 기록)
