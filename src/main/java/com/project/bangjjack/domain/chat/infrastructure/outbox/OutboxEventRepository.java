@@ -11,20 +11,34 @@ import java.util.List;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
 
-    /**
-     * 미발행 이벤트를 id 순으로 잠그며 가져온다 (FOR UPDATE SKIP LOCKED).
-     * 다중 서버의 폴러가 같은 행을 중복 처리하지 않게 하고, 잠긴 행은 건너뛴다.
-     * 호출자의 트랜잭션 안에서 실행해야 잠금이 발행·표시까지 유지된다.
-     * threshold: 이보다 먼저 생성된 행만 (즉시 발행이 표시할 유예 시간 확보).
-     */
-    @Query(value = "SELECT * FROM outbox_event WHERE published_at IS NULL AND failed_at IS NULL AND created_at <= :threshold "
-            + "ORDER BY id LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<OutboxEvent> findUnpublishedForUpdate(@Param("threshold") LocalDateTime threshold, @Param("limit") int limit);
+    /** 짧은 선점 트랜잭션에서만 호출한다. 만료된 선점은 다른 폴러가 회수할 수 있다. */
+    @Query(value = "SELECT * FROM outbox_event WHERE published_at IS NULL AND failed_at IS NULL "
+            + "AND created_at <= :threshold AND (claimed_until IS NULL OR claimed_until <= :now) "
+            + "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<OutboxEvent> findClaimableForUpdate(@Param("threshold") LocalDateTime threshold,
+                                           @Param("now") LocalDateTime now);
+
+    @Modifying
+    @Query("UPDATE OutboxEvent o SET o.publishedAt = :now, o.claimToken = NULL, o.claimedUntil = NULL "
+            + "WHERE o.id = :id AND o.claimToken = :token AND o.publishedAt IS NULL AND o.failedAt IS NULL")
+    int completeClaim(@Param("id") Long id, @Param("token") String token, @Param("now") LocalDateTime now);
+
+    @Modifying
+    @Query("UPDATE OutboxEvent o SET o.failedAt = :now, o.failureReason = :reason, "
+            + "o.claimToken = NULL, o.claimedUntil = NULL "
+            + "WHERE o.id = :id AND o.claimToken = :token AND o.publishedAt IS NULL AND o.failedAt IS NULL")
+    int failClaim(@Param("id") Long id, @Param("token") String token,
+                  @Param("now") LocalDateTime now, @Param("reason") String reason);
+
+    @Modifying
+    @Query("UPDATE OutboxEvent o SET o.claimToken = NULL, o.claimedUntil = NULL "
+            + "WHERE o.id = :id AND o.claimToken = :token AND o.publishedAt IS NULL AND o.failedAt IS NULL")
+    int releaseClaim(@Param("id") Long id, @Param("token") String token);
 
     /** 즉시 발행 성공 시 해당 방의 미발행 행을 발행됨으로 표시 (방은 한 번만 생성되므로 상관키로 roomId 사용). */
     @Transactional
     @Modifying
-    @Query("UPDATE OutboxEvent o SET o.publishedAt = :now "
+    @Query("UPDATE OutboxEvent o SET o.publishedAt = :now, o.claimToken = NULL, o.claimedUntil = NULL "
             + "WHERE o.roomId = :roomId AND o.eventType = com.project.bangjjack.domain.chat.infrastructure.outbox.OutboxEvent.TYPE_ROOM_CREATED "
             + "AND o.publishedAt IS NULL AND o.failedAt IS NULL")
     void markRoomCreatedPublished(@Param("roomId") Long roomId, @Param("now") LocalDateTime now);

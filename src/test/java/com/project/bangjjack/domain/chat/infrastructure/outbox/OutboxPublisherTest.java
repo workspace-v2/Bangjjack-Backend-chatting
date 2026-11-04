@@ -4,118 +4,107 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bangjjack.domain.chat.infrastructure.event.RoomCreatedPublisher;
 import com.project.bangjjack.global.infrastructure.JsonSerializer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.argThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
-@DisplayName("OutboxPublisher - 미발행 이벤트 재발행")
 class OutboxPublisherTest {
-
     private final OutboxEventRepository repository = mock(OutboxEventRepository.class);
-    private final RoomCreatedPublisher roomCreatedPublisher = mock(RoomCreatedPublisher.class);
-    private final JsonSerializer jsonSerializer = new JsonSerializer(new ObjectMapper());
-    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-    private final OutboxPublisher publisher =
-            new OutboxPublisher(repository, roomCreatedPublisher, jsonSerializer, meterRegistry, 3000, 100, 60);
+    private final OutboxClaimService claims = mock(OutboxClaimService.class);
+    private final RoomCreatedPublisher redis = mock(RoomCreatedPublisher.class);
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    private final OutboxPublisher publisher = new OutboxPublisher(repository, claims, redis,
+            new JsonSerializer(new ObjectMapper()), meters, 3000, 100, 60, 60000);
 
-    private OutboxEvent roomCreatedRow(long roomId) {
-        return OutboxEvent.roomCreated(roomId, "{\"roomId\":" + roomId + ",\"participantIds\":[1,2]}");
+    private OutboxClaimService.Claim row(long id, String type, String payload) {
+        return new OutboxClaimService.Claim(id, id, type, payload, "token-" + id);
+    }
+
+    private OutboxClaimService.Claim valid(long id) {
+        return row(id, "ROOM_CREATED", "{\"roomId\":" + id + ",\"participantIds\":[1,2]}");
     }
 
     @Test
-    @DisplayName("미발행 이벤트를 delayed 로 발행하고 발행됨으로 표시한다")
-    void publishesAndMarks() {
-        OutboxEvent row = roomCreatedRow(10L);
-        given(repository.findUnpublishedForUpdate(any(), anyInt())).willReturn(List.of(row));
-
+    void publishesAfterClaimAndCompletesSeparately() {
+        var row = valid(10);
+        given(claims.claim(any(), anyLong())).willReturn(Optional.of(row), Optional.empty());
+        given(claims.complete(row)).willReturn(true);
         publisher.publishPending();
-
-        verify(roomCreatedPublisher).publish(argThat(e -> e.roomId().equals(10L) && e.delayed()));
-        assertThat(row.isPublished()).isTrue();
-        assertThat(meterRegistry.counter(OutboxPublisher.RECOVERED_METRIC).count()).isEqualTo(1.0);
+        var order = inOrder(claims, redis);
+        order.verify(claims).claim(any(), eq(60000L));
+        order.verify(redis).publish(argThat(e -> e.roomId().equals(10L) && e.delayed()));
+        order.verify(claims).complete(row);
+        assertThat(meters.counter(OutboxPublisher.RECOVERED_METRIC).count()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("발행 중 실패하면 그 주기를 멈추고, 실패 이전 행만 표시한다")
-    void stopsOnFailure() {
-        OutboxEvent first = roomCreatedRow(10L);
-        OutboxEvent second = roomCreatedRow(20L);
-        OutboxEvent third = roomCreatedRow(30L);
-        given(repository.findUnpublishedForUpdate(any(), anyInt())).willReturn(List.of(first, second, third));
-        doThrow(new RuntimeException("redis down")).when(roomCreatedPublisher)
-                .publish(argThat(e -> e.roomId().equals(20L)));
-
+    void redisFailureReleasesClaimAndStopsBeforeClaimingAnotherRow() {
+        var row = valid(10);
+        given(claims.claim(any(), anyLong())).willReturn(Optional.of(row));
+        doThrow(new RuntimeException("redis down")).when(redis).publish(any());
         publisher.publishPending();
-
-        assertThat(first.isPublished()).isTrue();
-        assertThat(second.isPublished()).isFalse();
-        assertThat(second.getFailedAt()).isNull();
-        assertThat(third.isPublished()).isFalse();
-        verify(roomCreatedPublisher, never()).publish(argThat(e -> e.roomId().equals(30L)));
-        assertThat(meterRegistry.counter(OutboxPublisher.RECOVERED_METRIC).count()).isEqualTo(1.0);
+        verify(claims).release(row);
+        verify(claims, never()).complete(any());
+        verify(claims, never()).fail(any(), any());
+        verify(claims, times(1)).claim(any(), anyLong());
     }
 
     @Test
-    @DisplayName("잘못된 JSON과 유효하지 않은 payload는 격리하고 뒤의 정상 이벤트를 발행한다")
-    void isolatesInvalidPayloads() {
-        for (String payload : List.of("broken", "null", "{}", "{\"roomId\":10,\"participantIds\":[]}")) {
-            OutboxEvent invalid = OutboxEvent.roomCreated(10L, payload);
-            OutboxEvent valid = roomCreatedRow(20L);
-            given(repository.findUnpublishedForUpdate(any(), anyInt())).willReturn(List.of(invalid, valid));
+    void completionFailureKeepsLeaseForRecovery() {
+        var row = valid(10);
+        given(claims.claim(any(), anyLong())).willReturn(Optional.of(row));
+        given(claims.complete(row)).willThrow(new IllegalStateException("DB down"));
+        assertThatThrownBy(publisher::publishPending).isInstanceOf(IllegalStateException.class);
+        verify(claims, never()).release(any());
+    }
 
+    @Test
+    void isolatesBadDataAndContinues() {
+        for (String payload : java.util.List.of("broken", "null", "{}", "{\"roomId\":10,\"participantIds\":[]}")) {
+            var bad = row(10, "ROOM_CREATED", payload);
+            var good = valid(20);
+            given(claims.claim(any(), anyLong())).willReturn(Optional.of(bad), Optional.of(good), Optional.empty());
+            given(claims.fail(eq(bad), anyString())).willReturn(true);
             publisher.publishPending();
-
-            assertThat(invalid.isPublished()).isFalse();
-            assertThat(invalid.getFailedAt()).isNotNull();
-            assertThat(invalid.getFailureReason()).isNotBlank();
-            assertThat(valid.isPublished()).isTrue();
+            verify(claims).fail(eq(bad), anyString());
         }
-        assertThat(meterRegistry.counter("chat.outbox.failed").count()).isEqualTo(4);
+        assertThat(meters.counter("chat.outbox.failed").count()).isEqualTo(4);
     }
 
     @Test
-    @DisplayName("미지원 타입은 격리하고 뒤의 정상 이벤트를 발행한다")
     void isolatesUnsupportedType() {
-        OutboxEvent invalid = roomCreatedRow(10L);
-        org.springframework.test.util.ReflectionTestUtils.setField(invalid, "eventType", "UNKNOWN");
-        OutboxEvent valid = roomCreatedRow(20L);
-        given(repository.findUnpublishedForUpdate(any(), anyInt())).willReturn(List.of(invalid, valid));
-
+        var bad = row(10, "UNKNOWN", "{}");
+        given(claims.claim(any(), anyLong())).willReturn(Optional.of(bad), Optional.empty());
         publisher.publishPending();
-
-        assertThat(invalid.isPublished()).isFalse();
-        assertThat(invalid.getFailedAt()).isNotNull();
-        assertThat(valid.isPublished()).isTrue();
+        verify(claims).fail(eq(bad), anyString());
+        verifyNoInteractions(redis);
     }
 
     @Test
-    @DisplayName("미발행 이벤트가 없으면 아무것도 발행하지 않는다")
+    void doesNotCountAlreadyCompletedOrReclaimedRow() {
+        var row = valid(10);
+        given(claims.claim(any(), anyLong())).willReturn(Optional.of(row), Optional.empty());
+        given(claims.complete(row)).willReturn(false);
+        publisher.publishPending();
+        assertThat(meters.counter(OutboxPublisher.RECOVERED_METRIC).count()).isZero();
+    }
+
+    @Test
     void noopWhenEmpty() {
-        given(repository.findUnpublishedForUpdate(any(), anyInt())).willReturn(List.of());
-
+        given(claims.claim(any(), anyLong())).willReturn(Optional.empty());
         publisher.publishPending();
-
-        verify(roomCreatedPublisher, never()).publish(any());
+        verifyNoInteractions(redis);
     }
 
     @Test
-    @DisplayName("정리: 보관 기간이 지난 발행 완료 행을 삭제한다")
     void cleanupDeletesOld() {
-        given(repository.deletePublishedBefore(any())).willReturn(5);
-
         publisher.cleanup();
-
         verify(repository).deletePublishedBefore(any());
     }
 }

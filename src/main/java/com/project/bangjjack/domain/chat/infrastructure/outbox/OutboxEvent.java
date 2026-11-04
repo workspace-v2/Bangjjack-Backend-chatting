@@ -51,6 +51,17 @@ public class OutboxEvent {
     @Column(name = "failure_reason", columnDefinition = "TEXT")
     private String failureReason;
 
+    @Column(name = "claim_token", length = 36)
+    private String claimToken;
+
+    @Column(name = "claimed_until")
+    private LocalDateTime claimedUntil;
+
+    public void claim(String token, LocalDateTime until) {
+        this.claimToken = token;
+        this.claimedUntil = until;
+    }
+
     public void markFailed(String reason) {
         this.failedAt = LocalDateTime.now();
         this.failureReason = reason;

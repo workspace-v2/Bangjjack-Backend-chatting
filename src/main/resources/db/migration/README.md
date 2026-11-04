@@ -75,10 +75,22 @@ WHERE r.last_message_id IS NULL OR r.last_message_id < latest.last_id;
 
 - 흐름: 방 생성 트랜잭션에서 `record`(BEFORE_COMMIT)가 미발행 행을 저장 → 커밋 직후 `publishImmediately`(AFTER_COMMIT)가
   즉시 발행하고 성공하면 `published_at` 을 채운다 → 실패(Redis 장애)하면 미발행으로 남고 폴러(`OutboxPublisher`)가 복구 때까지 재발행한다.
-- 폴러는 `published_at IS NULL AND created_at <= now-grace` 를 `FOR UPDATE SKIP LOCKED` 로 잠근 채 발행까지 한 트랜잭션에서 처리해,
-  다중 서버가 같은 행을 중복 발행하지 않는다. grace(기본 3초)는 즉시 발행이 표시할 유예 시간.
+- 폴러는 미발행·미실패 행을 한 행씩 `FOR UPDATE SKIP LOCKED`로 선점하고 커밋한다. Redis 발행은 트랜잭션 밖에서 수행하고,
+  결과는 선점 토큰을 확인하는 별도 트랜잭션에서 기록한다. grace(기본 3초)는 즉시 발행이 표시할 유예 시간.
 - 폴러가 발행하는 이벤트는 `delayed=true` 로 표시돼, 수신 서버가 그 사이 새로 구독한 세션에 재동기화 신호(SYNC_REQUIRED)를 보낸다.
-- `IDX_outbox_unpublished (published_at, id)`: 미발행분 폴링용. 발행 완료 행은 `cleanup`(기본 1시간 주기, 보관 60분)으로 삭제해 테이블 증가를 막는다.
+- `IDX_outbox_unpublished (published_at, failed_at, id)` (V7): 미발행분 폴링용. 발행 완료 행은 `cleanup`(기본 1시간 주기, 보관 60분)으로 삭제해 테이블 증가를 막는다.
 - 설정: `chat.outbox.poll-interval-ms`(1000), `publish-grace-ms`(3000), `batch-size`(100), `retention-minutes`(60), `cleanup-interval-ms`(3600000).
 - 새 테이블 추가라 구버전과 호환된다 (expand). 배포 후 확인: `SHOW TABLES LIKE 'outbox_event';`, `SELECT COUNT(*) FROM outbox_event WHERE published_at IS NULL;` (정상 운영 중 0 수렴).
 - 지표: `chat.outbox.pending`(미발행 수, Gauge), `chat.outbox.recovered`(폴러가 재발행한 수, Counter).
+
+### Outbox 선점 (V8)
+
+- `claim_token`, `claimed_until`을 NULL 허용으로 추가한다. 기존 행은 바로 선점 가능하다.
+- 선점 및 결과 갱신은 별도 빈의 `REQUIRES_NEW`, `READ_COMMITTED` 트랜잭션에서 실행한다.
+  Redis 발행 중 DB 행 잠금이나 커넥션을 보유하지 않는다.
+- `chat.outbox.claim-lease-ms`(기본 60000): 프로세스 종료·DB 결과 기록 실패 시 선점 만료 후 재처리한다.
+  Redis 호출의 최대 재시도·타임아웃보다 여유 있게 설정한다. 발행이 선점 만료보다 오래 걸리면 중복 발행될 수 있다.
+- 완료·격리·선점 해제는 토큰이 같은 행에만 적용한다. 만료 후 이전 작업자의 응답은 새 선점을 변경하지 않는다.
+- Redis 성공 직후 프로세스가 종료되면 재발행될 수 있는 at-least-once 방식이다. 구독 및 재동기화는 중복 수신에 안전하게 처리한다.
+- nullable 컬럼 추가이므로 구버전과 스키마는 호환된다. 롤링 배포 중 구버전 폴러는 선점을 인식하지 않아 중복 발행 및 기존 잠금 동작이 남을 수 있다.
+  모든 서버가 새 버전으로 교체된 뒤 잠금 분리가 적용된다.

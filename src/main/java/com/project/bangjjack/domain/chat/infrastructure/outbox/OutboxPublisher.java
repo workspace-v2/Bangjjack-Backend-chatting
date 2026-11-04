@@ -10,9 +10,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * Outbox 안전망. 즉시 발행이 실패한(= Redis 장애) 방 생성 이벤트를 주기적으로 다시 발행한다.
@@ -26,6 +26,8 @@ public class OutboxPublisher {
     static final String RECOVERED_METRIC = "chat.outbox.recovered";
 
     private final OutboxEventRepository repository;
+    private final OutboxClaimService claims;
+    private final long leaseMs;
     private final RoomCreatedPublisher roomCreatedPublisher;
     private final JsonSerializer jsonSerializer;
     private final Counter recoveredCounter;
@@ -36,14 +38,21 @@ public class OutboxPublisher {
 
     public OutboxPublisher(
             OutboxEventRepository repository,
+            OutboxClaimService claims,
             RoomCreatedPublisher roomCreatedPublisher,
             JsonSerializer jsonSerializer,
             MeterRegistry meterRegistry,
             @Value("${chat.outbox.publish-grace-ms:3000}") long graceMs,
             @Value("${chat.outbox.batch-size:100}") int batchSize,
-            @Value("${chat.outbox.retention-minutes:60}") long retentionMinutes
+            @Value("${chat.outbox.retention-minutes:60}") long retentionMinutes,
+            @Value("${chat.outbox.claim-lease-ms:60000}") long leaseMs
     ) {
+        if (leaseMs <= 0) {
+            throw new IllegalArgumentException("claim-lease-ms는 양수여야 합니다.");
+        }
         this.repository = repository;
+        this.claims = claims;
+        this.leaseMs = leaseMs;
         this.roomCreatedPublisher = roomCreatedPublisher;
         this.jsonSerializer = jsonSerializer;
         this.graceMs = graceMs;
@@ -61,41 +70,39 @@ public class OutboxPublisher {
                 .register(meterRegistry);
     }
 
-    /**
-     * 미발행 이벤트를 발행하고 표시한다. FOR UPDATE SKIP LOCKED 로 잠근 채 발행까지 한 트랜잭션에서 처리해,
-     * 다중 서버·다중 폴링이 같은 행을 중복 발행하지 않게 한다. 발행이 실패하면(Redis 장애) 그 주기는 멈추고
-     * 다음 주기에 다시 시도한다 (표시 안 된 행은 잠금이 풀려 다시 대상이 됨).
-     * 데이터 오류는 실패 상태로 격리해 이후 정상 이벤트의 발행을 막지 않는다.
-     */
+    /** 한 행씩 선점·커밋한 뒤 Redis에 발행하고, 별도 트랜잭션에서 결과를 기록한다. */
     @Scheduled(scheduler = "outboxScheduler", fixedDelayString = "${chat.outbox.poll-interval-ms:1000}")
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void publishPending() {
         LocalDateTime threshold = LocalDateTime.now().minusNanos(graceMs * 1_000_000);
-        List<OutboxEvent> pending = repository.findUnpublishedForUpdate(threshold, batchSize);
-        if (pending.isEmpty()) {
-            return;
-        }
         int published = 0;
-        for (OutboxEvent row : pending) {
+        for (int i = 0; i < batchSize; i++) {
+            var next = claims.claim(threshold, leaseMs);
+            if (next.isEmpty()) {
+                break;
+            }
+            var row = next.get();
             ChatRoomCreatedEvent event;
             try {
                 event = decode(row);
             } catch (RuntimeException e) {
-                row.markFailed(e.getMessage());
-                failedCounter.increment();
-                log.error("[Outbox] 데이터 오류로 이벤트 격리, 수정 후 재처리 필요 - id={}, roomId={}",
-                        row.getId(), row.getRoomId(), e);
+                if (claims.fail(row, e.getMessage())) {
+                    failedCounter.increment();
+                }
+                log.error("[Outbox] 데이터 오류로 이벤트 격리 - id={}, roomId={}", row.id(), row.roomId(), e);
                 continue;
             }
             try {
                 roomCreatedPublisher.publish(event.asDelayed());
-                row.markPublished();
-                published++;
             } catch (Exception e) {
-                // 대부분 Redis 장애. 나머지도 실패할 것이므로 이번 주기는 멈추고 표시된 것만 커밋한다.
-                log.warn("[Outbox] 재발행 실패, 이번 주기 중단 - id={}, roomId={}, 원인={}",
-                        row.getId(), row.getRoomId(), e.getMessage());
+                // 아직 시도하지 않은 행은 선점하지 않는다. 실패 행은 다음 주기에 다시 시도한다.
+                claims.release(row);
+                log.warn("[Outbox] 재발행 실패, 이번 주기 중단 - id={}, roomId={}", row.id(), row.roomId(), e);
                 break;
+            }
+            // Redis 성공 후 DB 갱신 실패 시 선점을 유지한다. 만료 후 재발행될 수 있다(at-least-once).
+            if (claims.complete(row)) {
+                published++;
             }
         }
         if (published > 0) {
@@ -104,17 +111,17 @@ public class OutboxPublisher {
         }
     }
 
-    private ChatRoomCreatedEvent decode(OutboxEvent row) {
-        if (OutboxEvent.TYPE_ROOM_CREATED.equals(row.getEventType())) {
-            ChatRoomCreatedEvent event = jsonSerializer.deserialize(row.getPayload(), ChatRoomCreatedEvent.class);
-            if (event == null || event.roomId() == null || !event.roomId().equals(row.getRoomId())
+    private ChatRoomCreatedEvent decode(OutboxClaimService.Claim row) {
+        if (OutboxEvent.TYPE_ROOM_CREATED.equals(row.eventType())) {
+            ChatRoomCreatedEvent event = jsonSerializer.deserialize(row.payload(), ChatRoomCreatedEvent.class);
+            if (event == null || event.roomId() == null || !event.roomId().equals(row.roomId())
                     || event.participantIds() == null || event.participantIds().isEmpty()
                     || event.participantIds().stream().anyMatch(java.util.Objects::isNull)) {
-                throw new IllegalArgumentException("유효하지 않은 방 생성 이벤트: " + row.getId());
+                throw new IllegalArgumentException("유효하지 않은 방 생성 이벤트: " + row.id());
             }
             return event;
         }
-        throw new IllegalStateException("알 수 없는 Outbox 이벤트 타입: " + row.getEventType());
+        throw new IllegalStateException("알 수 없는 Outbox 이벤트 타입: " + row.eventType());
     }
 
     /** 발행 완료된 오래된 행을 정리한다 (테이블 무한 증가 방지). */
