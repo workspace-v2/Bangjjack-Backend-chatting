@@ -2,6 +2,7 @@ package com.project.bangjjack.domain.chat.infrastructure.pubsub;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bangjjack.domain.chat.application.event.ChatRoomCreatedEvent;
+import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.infrastructure.broadcaster.ChatBroadcaster;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
 import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
@@ -30,8 +31,16 @@ class ChatRoomCreatedSubscriberTest {
     private final RedissonClient redis = mock(RedissonClient.class);
     private final WebSocketSessionStore store = new WebSocketSessionStore();
     private final ChatBroadcaster broadcaster = mock(ChatBroadcaster.class);
+    private final ChatRoomGetService roomGetService =
+            mock(ChatRoomGetService.class);
+    private final RoomSubscriptionRecovery recovery = mock(RoomSubscriptionRecovery.class);
+    @org.junit.jupiter.api.BeforeEach
+    void activeParticipants() {
+        given(roomGetService.findActiveUserIdsByRoomId(ROOM_ID)).willReturn(List.of(1L, 2L, 4L));
+    }
+
     private final ChatRoomCreatedSubscriber subscriber = new ChatRoomCreatedSubscriber(
-            redis, new ObjectMapper(), store, mock(RoomSubscriptionRecovery.class), broadcaster);
+            redis, new ObjectMapper(), store, recovery, broadcaster, roomGetService);
 
     private WebSocketSession session(String id, Long userId, boolean open) {
         WebSocketSession session = mock(WebSocketSession.class);
@@ -132,7 +141,7 @@ class ChatRoomCreatedSubscriberTest {
                 store, new com.project.bangjjack.global.infrastructure.JsonSerializer(new ObjectMapper()),
                 io.micrometer.tracing.Tracer.NOOP);
         var realSubscriber = new ChatRoomCreatedSubscriber(
-                redis, new ObjectMapper(), store, mock(RoomSubscriptionRecovery.class), realBroadcaster);
+                redis, new ObjectMapper(), store, recovery, realBroadcaster, roomGetService);
         WebSocketSession broken = session("broken", 1L, true);
         org.mockito.Mockito.doThrow(new java.io.IOException("broken pipe")).when(broken).sendMessage(any());
         ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L)).asDelayed();
@@ -149,6 +158,36 @@ class ChatRoomCreatedSubscriberTest {
         verify(reconnected).sendMessage(sent.capture());
         assertThat(new ObjectMapper().readTree(sent.getValue().getPayload()).get("type").asText())
                 .isEqualTo("SYNC_REQUIRED");
+    }
+
+    @Test
+    @DisplayName("생성 후 나간 참여자는 지연 이벤트가 중복 도착해도 구독하지 않는다")
+    void excludesLeftParticipantFromDelayedEvent() {
+        WebSocketSession left = session("left", 1L, true);
+        WebSocketSession active = session("active", 2L, true);
+        given(roomGetService.findActiveUserIdsByRoomId(ROOM_ID)).willReturn(List.of(2L));
+        ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L, 2L)).asDelayed();
+
+        subscriber.subscribeActiveSessions(event);
+        subscriber.subscribeActiveSessions(event);
+
+        assertThat(store.isSubscribed(ROOM_ID, left)).isFalse();
+        assertThat(store.isSubscribed(ROOM_ID, active)).isTrue();
+        verify(broadcaster, never()).sendSyncRequired(argThat(s -> s.getId().equals("left")), any());
+        verify(broadcaster).sendSyncRequired(argThat(s -> s.getId().equals("active")), eq(ROOM_ID));
+    }
+
+    @Test
+    @DisplayName("현재 참여자를 조회하지 못하면 구독하지 않고 복구를 요청한다")
+    void requestsRecoveryOnDatabaseFailure() {
+        WebSocketSession active = session("active", 1L, true);
+        given(roomGetService.findActiveUserIdsByRoomId(ROOM_ID)).willThrow(new RuntimeException("db down"));
+
+        subscriber.subscribeActiveSessions(new ChatRoomCreatedEvent(ROOM_ID, List.of(1L)).asDelayed());
+
+        assertThat(store.isSubscribed(ROOM_ID, active)).isFalse();
+        verifyNoInteractions(broadcaster);
+        verify(recovery).requestRecovery();
     }
 
     @Test
