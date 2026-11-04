@@ -95,6 +95,63 @@ class ChatRoomCreatedSubscriberTest {
     }
 
     @Test
+    @DisplayName("동시에 도착한 중복 delayed 이벤트도 구독과 재동기화를 한 번만 수행한다")
+    void concurrentDuplicatesAreIdempotent() throws Exception {
+        WebSocketSession active = session("s-1", 1L, true);
+        ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L)).asDelayed();
+        var ready = new java.util.concurrent.CountDownLatch(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<Void> task = () -> {
+                ready.countDown();
+                if (!start.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    throw new AssertionError("start timeout");
+                }
+                subscriber.subscribeActiveSessions(event);
+                return null;
+            };
+            var first = executor.submit(task);
+            var second = executor.submit(task);
+            try {
+                assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            } finally {
+                start.countDown();
+            }
+            first.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            second.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        assertThat(store.getSessionsByRoom(ROOM_ID)).hasSize(1);
+        assertThat(store.isSubscribed(ROOM_ID, active)).isTrue();
+        verify(broadcaster).sendSyncRequired(any(), eq(ROOM_ID));
+    }
+
+    @Test
+    @DisplayName("실제 전송 실패 시 연결을 닫고 새 세션에는 다시 구독과 재동기화를 수행한다")
+    void failedSyncClosesConnectionAndNewSessionCanRecover() throws Exception {
+        var realBroadcaster = new com.project.bangjjack.domain.chat.infrastructure.broadcaster.WebSocketBroadcaster(
+                store, new com.project.bangjjack.global.infrastructure.JsonSerializer(new ObjectMapper()),
+                io.micrometer.tracing.Tracer.NOOP);
+        var realSubscriber = new ChatRoomCreatedSubscriber(
+                redis, new ObjectMapper(), store, mock(RoomSubscriptionRecovery.class), realBroadcaster);
+        WebSocketSession broken = session("broken", 1L, true);
+        org.mockito.Mockito.doThrow(new java.io.IOException("broken pipe")).when(broken).sendMessage(any());
+        ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L)).asDelayed();
+
+        realSubscriber.subscribeActiveSessions(event);
+
+        verify(broken).close(org.springframework.web.socket.CloseStatus.SESSION_NOT_RELIABLE);
+        store.deregisterGlobal(broken);
+        WebSocketSession reconnected = session("reconnected", 1L, true);
+        realSubscriber.subscribeActiveSessions(event);
+
+        assertThat(store.isSubscribed(ROOM_ID, reconnected)).isTrue();
+        var sent = org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.TextMessage.class);
+        verify(reconnected).sendMessage(sent.capture());
+        assertThat(new ObjectMapper().readTree(sent.getValue().getPayload()).get("type").asText())
+                .isEqualTo("SYNC_REQUIRED");
+    }
+
+    @Test
     @DisplayName("일반 이벤트는 재동기화 신호를 보내지 않는다")
     void normalEventDoesNotSendSyncRequired() {
         session("s-1", 1L, true);
