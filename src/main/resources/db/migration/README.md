@@ -67,3 +67,18 @@ WHERE r.last_message_id IS NULL OR r.last_message_id < latest.last_id;
   ```
 - 메시지 페이지는 인덱스를 추가해도 옵티마이저가 PRIMARY 역방향 스캔을 골랐다 (prefer_ordering_index). 그래서 `ChatRepository` 의
   메시지 페이지 쿼리 2개가 네이티브 SQL `FORCE INDEX (IDX_chat_room_deleted_id)` 를 쓴다. **이 인덱스 이름을 바꾸거나 지우면 쿼리가 실패한다.**
+
+### Outbox 이벤트 테이블 (V6)
+
+`outbox_event`: 방 생성 이벤트를 방과 같은 트랜잭션에 저장해(원자적 커밋) Redis 장애가 길어져도 유실 없이 발행한다.
+기존 V5 이하는 발행 실패분을 메모리 재시도(최대 3분)로만 버텨 그 이상 장애면 유실됐다 (PR #41 리뷰 지적).
+
+- 흐름: 방 생성 트랜잭션에서 `record`(BEFORE_COMMIT)가 미발행 행을 저장 → 커밋 직후 `publishImmediately`(AFTER_COMMIT)가
+  즉시 발행하고 성공하면 `published_at` 을 채운다 → 실패(Redis 장애)하면 미발행으로 남고 폴러(`OutboxPublisher`)가 복구 때까지 재발행한다.
+- 폴러는 `published_at IS NULL AND created_at <= now-grace` 를 `FOR UPDATE SKIP LOCKED` 로 잠근 채 발행까지 한 트랜잭션에서 처리해,
+  다중 서버가 같은 행을 중복 발행하지 않는다. grace(기본 3초)는 즉시 발행이 표시할 유예 시간.
+- 폴러가 발행하는 이벤트는 `delayed=true` 로 표시돼, 수신 서버가 그 사이 새로 구독한 세션에 재동기화 신호(SYNC_REQUIRED)를 보낸다.
+- `IDX_outbox_unpublished (published_at, id)`: 미발행분 폴링용. 발행 완료 행은 `cleanup`(기본 1시간 주기, 보관 60분)으로 삭제해 테이블 증가를 막는다.
+- 설정: `chat.outbox.poll-interval-ms`(1000), `publish-grace-ms`(3000), `batch-size`(100), `retention-minutes`(60), `cleanup-interval-ms`(3600000).
+- 새 테이블 추가라 구버전과 호환된다 (expand). 배포 후 확인: `SHOW TABLES LIKE 'outbox_event';`, `SELECT COUNT(*) FROM outbox_event WHERE published_at IS NULL;` (정상 운영 중 0 수렴).
+- 지표: `chat.outbox.pending`(미발행 수, Gauge), `chat.outbox.recovered`(폴러가 재발행한 수, Counter).
