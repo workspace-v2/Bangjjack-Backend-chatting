@@ -1,5 +1,18 @@
 package com.project.bangjjack.domain.chat.domain.service;
 
+import com.project.bangjjack.domain.chat.infrastructure.outbox.OutboxClaimService;
+import com.project.bangjjack.domain.chat.infrastructure.outbox.OutboxEvent;
+import com.project.bangjjack.domain.chat.infrastructure.outbox.OutboxEventRepository;
+import com.project.bangjjack.domain.chat.infrastructure.outbox.OutboxPublisher;
+import com.project.bangjjack.domain.chat.infrastructure.event.RoomCreatedPublisher;
+import com.project.bangjjack.global.infrastructure.JsonSerializer;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import java.time.LocalDateTime;
+import java.util.concurrent.CountDownLatch;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
 import com.project.bangjjack.domain.chat.domain.entity.Chat;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoom;
 import com.project.bangjjack.domain.chat.domain.entity.ChatRoomCategory;
@@ -43,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Uses create-drop: CHAT_TEST_MYSQL_URL must point to a disposable, dedicated test database. */
 @DataJpaTest(showSql = false)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({ChatSaveService.class, ChatStateUpdateService.class, ChatRoomCreateService.class, QuerydslConfig.class,
+@Import({OutboxClaimService.class, ChatSaveService.class, ChatStateUpdateService.class, ChatRoomCreateService.class, QuerydslConfig.class,
         ChatStateMysqlIntegrationTest.RepositoryImplementations.class})
 @ActiveProfiles("test")
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -74,6 +87,8 @@ class ChatStateMysqlIntegrationTest {
         registry.add("spring.jpa.show-sql", () -> false);
     }
 
+    @Autowired OutboxEventRepository outboxRepository;
+    @Autowired OutboxClaimService claims;
     @Autowired ChatSaveService saves;
     @Autowired ChatStateUpdateService updates;
     @Autowired ChatRoomCreateService creates;
@@ -88,6 +103,7 @@ class ChatStateMysqlIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        outboxRepository.deleteAllInBatch();
         transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         transaction.executeWithoutResult(status -> {
@@ -259,5 +275,73 @@ class ChatStateMysqlIntegrationTest {
 
     private ChatRoomParticipant participant(Long userId) {
         return participants.findByChatRoomIdAndUserIdAndDeletedFalse(roomId, userId).orElseThrow();
+    }
+    private OutboxEvent insert(long roomId) {
+        return outboxRepository.saveAndFlush(OutboxEvent.roomCreated(roomId,
+                "{\"roomId\":" + roomId + ",\"participantIds\":[1,2]}"));
+    }
+
+    @Test
+    void blockedRedisDoesNotHoldTransactionOrBlockInsertAndImmediateCompletion() throws Exception {
+        var first = insert(10);
+        var redis = mock(RoomCreatedPublisher.class);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            entered.countDown();
+            assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+            return null;
+        }).when(redis).publish(any());
+        var publisher = new OutboxPublisher(outboxRepository, claims, redis,
+                new JsonSerializer(new ObjectMapper()), new SimpleMeterRegistry(), 0, 1, 60, 60000);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var publishing = workers.submit(publisher::publishPending);
+            try {
+                assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+                workers.submit(() -> {
+                    assertThat(claims.claim(LocalDateTime.now(), 60000)).isEmpty();
+                    outboxRepository.markRoomCreatedPublished(10L, LocalDateTime.now());
+                    insert(20); // Redis is still blocked; same-row UPDATE and INSERT must both finish.
+                }).get(5, TimeUnit.SECONDS);
+            } finally {
+                release.countDown();
+            }
+            publishing.get(5, TimeUnit.SECONDS);
+        }
+        assertThat(outboxRepository.findById(first.getId()).orElseThrow().isPublished()).isTrue();
+        assertThat(outboxRepository.count()).isEqualTo(2);
+    }
+
+    @Test
+    void expiredLeaseCanBeReclaimedAndOldOwnerCannotChangeNewClaim() {
+        var row = insert(10);
+        var first = claims.claim(LocalDateTime.now(), 60000).orElseThrow();
+        assertThat(claims.claim(LocalDateTime.now(), 60000)).isEmpty();
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            var entity = outboxRepository.findById(row.getId()).orElseThrow();
+            entity.claim(first.token(), LocalDateTime.now().minusSeconds(1));
+        });
+        var second = claims.claim(LocalDateTime.now(), 60000).orElseThrow();
+        assertThat(second.token()).isNotEqualTo(first.token());
+        assertThat(claims.complete(first)).isFalse();
+        assertThat(claims.fail(first, "stale")).isFalse();
+        claims.release(first);
+        assertThat(outboxRepository.findById(row.getId()).orElseThrow().getClaimToken()).isEqualTo(second.token());
+        assertThat(claims.complete(second)).isTrue();
+    }
+
+    @Test
+    void releasedClaimIsRetriedAndFailedDataIsExcluded() {
+        insert(10);
+        var first = claims.claim(LocalDateTime.now(), 60000).orElseThrow();
+        claims.release(first);
+        var retry = claims.claim(LocalDateTime.now(), 60000).orElseThrow();
+        assertThat(retry.id()).isEqualTo(first.id());
+        assertThat(claims.fail(retry, "bad payload")).isTrue();
+        assertThat(claims.claim(LocalDateTime.now(), 60000)).isEmpty();
+        var failed = outboxRepository.findById(first.id()).orElseThrow();
+        assertThat(failed.getFailureReason()).isEqualTo("bad payload");
+        assertThat(failed.getClaimToken()).isNull();
     }
 }
