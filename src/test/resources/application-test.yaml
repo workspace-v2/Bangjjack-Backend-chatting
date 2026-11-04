@@ -14,6 +14,7 @@ spring:
   flyway:
     enabled: false # 테스트는 H2 + Hibernate create-drop 으로 스키마를 만든다 (마이그레이션 SQL 은 MySQL 문법)
   jpa:
+    open-in-view: false # 운영 설정과 같게: 트랜잭션 밖 지연 로딩을 테스트에서 잡는다
     hibernate:
       ddl-auto: create-drop
     show-sql: true

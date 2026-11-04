@@ -51,7 +51,7 @@ public class ChatSaveService {
                                MessageType messageType, Long applicationId) {
         long seq = chatStateUpdateService.nextSeq(chatRoom.getId());
         Chat saved = chatRepository.save(Chat.create(senderId, chatRoom, content, messageType, applicationId, seq));
-        chatRoomRepository.updateLastMessageAt(chatRoom.getId(), saved.getCreatedAt());
+        chatRoomRepository.updateLastMessage(chatRoom.getId(), saved.getId(), saved.getCreatedAt());
         chatRoomParticipantRepository.incrementUnreadCountExcludingSender(chatRoom.getId(), senderId);
         return saved;
     }

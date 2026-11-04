@@ -10,7 +10,8 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(
     name = "chat_room_participant",
-    uniqueConstraints = @UniqueConstraint(name = "UQ_participant_room_user", columnNames = {"room_id", "user_id"})
+    uniqueConstraints = @UniqueConstraint(name = "UQ_participant_room_user", columnNames = {"room_id", "user_id"}),
+    indexes = @Index(name = "IDX_participant_user_status", columnList = "user_id, status, deleted")
 )
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
