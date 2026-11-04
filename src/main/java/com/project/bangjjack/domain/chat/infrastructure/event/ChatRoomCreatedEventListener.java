@@ -42,7 +42,8 @@ public class ChatRoomCreatedEventListener {
     public void publishImmediately(ChatRoomCreatedEvent event) {
         publishExecutor.execute(event.roomId(), () -> {
             try {
-                publisher.publish(event);
+                // 실행기 대기 및 Redis 발행 중 지연에도 누락 메시지를 조회하도록 한다.
+                publisher.publish(event.asDelayed());
                 outboxRepository.markRoomCreatedPublished(event.roomId(), LocalDateTime.now());
             } catch (Exception e) {
                 // 발행 실패(대부분 Redis 장애) → Outbox 미발행 상태로 남아 폴러가 재발행한다

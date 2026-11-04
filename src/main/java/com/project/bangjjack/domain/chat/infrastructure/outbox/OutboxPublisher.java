@@ -29,6 +29,7 @@ public class OutboxPublisher {
     private final RoomCreatedPublisher roomCreatedPublisher;
     private final JsonSerializer jsonSerializer;
     private final Counter recoveredCounter;
+    private final Counter failedCounter;
     private final long graceMs;
     private final int batchSize;
     private final long retentionMinutes;
@@ -51,8 +52,11 @@ public class OutboxPublisher {
         this.recoveredCounter = Counter.builder(RECOVERED_METRIC)
                 .description("폴러가 재발행으로 복구한 방 생성 이벤트 수")
                 .register(meterRegistry);
+        this.failedCounter = Counter.builder("chat.outbox.failed")
+                .description("데이터 오류로 격리된 Outbox 이벤트 수")
+                .register(meterRegistry);
         io.micrometer.core.instrument.Gauge.builder("chat.outbox.pending", repository,
-                        OutboxEventRepository::countByPublishedAtIsNull)
+                        OutboxEventRepository::countByPublishedAtIsNullAndFailedAtIsNull)
                 .description("아직 발행되지 않은 Outbox 이벤트 수")
                 .register(meterRegistry);
     }
@@ -61,6 +65,7 @@ public class OutboxPublisher {
      * 미발행 이벤트를 발행하고 표시한다. FOR UPDATE SKIP LOCKED 로 잠근 채 발행까지 한 트랜잭션에서 처리해,
      * 다중 서버·다중 폴링이 같은 행을 중복 발행하지 않게 한다. 발행이 실패하면(Redis 장애) 그 주기는 멈추고
      * 다음 주기에 다시 시도한다 (표시 안 된 행은 잠금이 풀려 다시 대상이 됨).
+     * 데이터 오류는 실패 상태로 격리해 이후 정상 이벤트의 발행을 막지 않는다.
      */
     @Scheduled(scheduler = "outboxScheduler", fixedDelayString = "${chat.outbox.poll-interval-ms:1000}")
     @Transactional
@@ -72,8 +77,18 @@ public class OutboxPublisher {
         }
         int published = 0;
         for (OutboxEvent row : pending) {
+            ChatRoomCreatedEvent event;
             try {
-                publish(row);
+                event = decode(row);
+            } catch (RuntimeException e) {
+                row.markFailed(e.getMessage());
+                failedCounter.increment();
+                log.error("[Outbox] 데이터 오류로 이벤트 격리, 수정 후 재처리 필요 - id={}, roomId={}",
+                        row.getId(), row.getRoomId(), e);
+                continue;
+            }
+            try {
+                roomCreatedPublisher.publish(event.asDelayed());
                 row.markPublished();
                 published++;
             } catch (Exception e) {
@@ -89,11 +104,15 @@ public class OutboxPublisher {
         }
     }
 
-    private void publish(OutboxEvent row) {
+    private ChatRoomCreatedEvent decode(OutboxEvent row) {
         if (OutboxEvent.TYPE_ROOM_CREATED.equals(row.getEventType())) {
             ChatRoomCreatedEvent event = jsonSerializer.deserialize(row.getPayload(), ChatRoomCreatedEvent.class);
-            roomCreatedPublisher.publish(event.asDelayed());
-            return;
+            if (event == null || event.roomId() == null || !event.roomId().equals(row.getRoomId())
+                    || event.participantIds() == null || event.participantIds().isEmpty()
+                    || event.participantIds().stream().anyMatch(java.util.Objects::isNull)) {
+                throw new IllegalArgumentException("유효하지 않은 방 생성 이벤트: " + row.getId());
+            }
+            return event;
         }
         throw new IllegalStateException("알 수 없는 Outbox 이벤트 타입: " + row.getEventType());
     }

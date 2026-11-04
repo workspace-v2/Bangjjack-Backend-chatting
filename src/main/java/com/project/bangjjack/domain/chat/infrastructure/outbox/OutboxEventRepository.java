@@ -17,7 +17,7 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
      * 호출자의 트랜잭션 안에서 실행해야 잠금이 발행·표시까지 유지된다.
      * threshold: 이보다 먼저 생성된 행만 (즉시 발행이 표시할 유예 시간 확보).
      */
-    @Query(value = "SELECT * FROM outbox_event WHERE published_at IS NULL AND created_at <= :threshold "
+    @Query(value = "SELECT * FROM outbox_event WHERE published_at IS NULL AND failed_at IS NULL AND created_at <= :threshold "
             + "ORDER BY id LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<OutboxEvent> findUnpublishedForUpdate(@Param("threshold") LocalDateTime threshold, @Param("limit") int limit);
 
@@ -26,7 +26,7 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
     @Modifying
     @Query("UPDATE OutboxEvent o SET o.publishedAt = :now "
             + "WHERE o.roomId = :roomId AND o.eventType = com.project.bangjjack.domain.chat.infrastructure.outbox.OutboxEvent.TYPE_ROOM_CREATED "
-            + "AND o.publishedAt IS NULL")
+            + "AND o.publishedAt IS NULL AND o.failedAt IS NULL")
     void markRoomCreatedPublished(@Param("roomId") Long roomId, @Param("now") LocalDateTime now);
 
     @Transactional
@@ -34,5 +34,5 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
     @Query("DELETE FROM OutboxEvent o WHERE o.publishedAt IS NOT NULL AND o.publishedAt < :before")
     int deletePublishedBefore(@Param("before") LocalDateTime before);
 
-    long countByPublishedAtIsNull();
+    long countByPublishedAtIsNullAndFailedAtIsNull();
 }

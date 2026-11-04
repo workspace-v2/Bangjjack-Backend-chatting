@@ -62,7 +62,22 @@ class ChatRoomCreatedEventListenerTest {
     void publishImmediatelyMarksPublishedOnSuccess() {
         listener.publishImmediately(EVENT);
 
-        verify(publisher).publish(EVENT);
+        verify(publisher).publish(EVENT.asDelayed());
+        verify(outboxRepository).markRoomCreatedPublished(eq(10L), any());
+    }
+
+    @Test
+    @DisplayName("실행기에서 대기한 즉시 발행도 재동기화가 필요한 이벤트로 발행한다")
+    void queuedPublishRequiresSync() {
+        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
+        org.mockito.Mockito.reset(executor);
+
+        listener.publishImmediately(EVENT);
+
+        verify(executor).execute(eq(10L), task.capture());
+        verify(publisher, never()).publish(any());
+        task.getValue().run();
+        verify(publisher).publish(EVENT.asDelayed());
         verify(outboxRepository).markRoomCreatedPublished(eq(10L), any());
     }
 
@@ -73,7 +88,7 @@ class ChatRoomCreatedEventListenerTest {
 
         listener.publishImmediately(EVENT);
 
-        verify(publisher).publish(EVENT);
+        verify(publisher).publish(EVENT.asDelayed());
         verify(outboxRepository, never()).markRoomCreatedPublished(anyLong(), any());
     }
 }

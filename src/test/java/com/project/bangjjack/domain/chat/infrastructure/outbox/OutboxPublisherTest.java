@@ -60,9 +60,43 @@ class OutboxPublisherTest {
 
         assertThat(first.isPublished()).isTrue();
         assertThat(second.isPublished()).isFalse();
+        assertThat(second.getFailedAt()).isNull();
         assertThat(third.isPublished()).isFalse();
         verify(roomCreatedPublisher, never()).publish(argThat(e -> e.roomId().equals(30L)));
         assertThat(meterRegistry.counter(OutboxPublisher.RECOVERED_METRIC).count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("잘못된 JSON과 유효하지 않은 payload는 격리하고 뒤의 정상 이벤트를 발행한다")
+    void isolatesInvalidPayloads() {
+        for (String payload : List.of("broken", "null", "{}", "{\"roomId\":10,\"participantIds\":[]}")) {
+            OutboxEvent invalid = OutboxEvent.roomCreated(10L, payload);
+            OutboxEvent valid = roomCreatedRow(20L);
+            given(repository.findUnpublishedForUpdate(any(), anyInt())).willReturn(List.of(invalid, valid));
+
+            publisher.publishPending();
+
+            assertThat(invalid.isPublished()).isFalse();
+            assertThat(invalid.getFailedAt()).isNotNull();
+            assertThat(invalid.getFailureReason()).isNotBlank();
+            assertThat(valid.isPublished()).isTrue();
+        }
+        assertThat(meterRegistry.counter("chat.outbox.failed").count()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("미지원 타입은 격리하고 뒤의 정상 이벤트를 발행한다")
+    void isolatesUnsupportedType() {
+        OutboxEvent invalid = roomCreatedRow(10L);
+        org.springframework.test.util.ReflectionTestUtils.setField(invalid, "eventType", "UNKNOWN");
+        OutboxEvent valid = roomCreatedRow(20L);
+        given(repository.findUnpublishedForUpdate(any(), anyInt())).willReturn(List.of(invalid, valid));
+
+        publisher.publishPending();
+
+        assertThat(invalid.isPublished()).isFalse();
+        assertThat(invalid.getFailedAt()).isNotNull();
+        assertThat(valid.isPublished()).isTrue();
     }
 
     @Test

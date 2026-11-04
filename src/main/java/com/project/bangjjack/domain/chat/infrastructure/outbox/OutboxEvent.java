@@ -19,7 +19,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "outbox_event",
-        indexes = @Index(name = "IDX_outbox_unpublished", columnList = "published_at, id"))
+        indexes = @Index(name = "IDX_outbox_unpublished", columnList = "published_at, failed_at, id"))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class OutboxEvent {
@@ -44,6 +44,17 @@ public class OutboxEvent {
 
     @Column(name = "published_at")
     private LocalDateTime publishedAt;
+
+    @Column(name = "failed_at")
+    private LocalDateTime failedAt;
+
+    @Column(name = "failure_reason", columnDefinition = "TEXT")
+    private String failureReason;
+
+    public void markFailed(String reason) {
+        this.failedAt = LocalDateTime.now();
+        this.failureReason = reason;
+    }
 
     private OutboxEvent(String eventType, Long roomId, String payload) {
         this.eventType = eventType;
