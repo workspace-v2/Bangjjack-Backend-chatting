@@ -1,0 +1,84 @@
+name: Label issues and PRs by title
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  pull_request_target:
+    types: [opened, edited, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: title-labeler-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  label:
+    if: github.event.action != 'edited' || github.event.changes.title != null
+    runs-on: ubuntu-26.04
+    timeout-minutes: 3
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      # Metadata only: never check out or execute code from the PR branch.
+      - name: Add the label matching the title prefix
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const item = context.payload.issue ?? context.payload.pull_request;
+            if (!item) return;
+
+            const params = { ...context.repo, issue_number: item.number };
+            // Read the latest title so queued events cannot apply stale titles.
+            const { data: current } = await github.rest.issues.get(params);
+            const match = current.title.match(
+              /^\s*(?:\[([a-z]+)\]|([a-z]+)(?:\([^()\r\n]+\))?!?(?:\s*:|\s+|$))/i
+            );
+            const type = (match?.[1] ?? match?.[2] ?? '').toLowerCase();
+            const rules = {
+              feat: ['feature', '17e2a7', '새로운 기능 구현'],
+              feature: ['feature', '17e2a7', '새로운 기능 구현'],
+              refactor: ['refactor', 'a2eeef', '코드 리팩토링'],
+              fix: ['bug', 'd73a4a', '버그 및 장애 원인 수정'],
+              bug: ['bug', 'd73a4a', '버그 및 장애 원인 수정'],
+              perf: ['pref', '7057ff', '성능 개선'],
+              pref: ['pref', '7057ff', '성능 개선'],
+              docs: ['documentation', '0075ca', '문서 작성 및 수정'],
+              documentation: ['documentation', '0075ca', '문서 작성 및 수정'],
+              release: ['release', 'f4e7f8', '릴리스'],
+              chore: ['chore', 'ededed', '유지보수 및 설정 변경'],
+              test: ['test', 'bfd4f2', '테스트 추가 및 수정'],
+              ci: ['ci', '1d76db', 'CI/CD 워크플로 변경'],
+              build: ['build', 'fef2c0', '빌드 및 의존성 변경'],
+              style: ['style', 'c5def5', '코드 스타일 및 포맷 변경'],
+              revert: ['revert', 'e99695', '기존 변경 되돌리기'],
+            };
+            if (!Object.hasOwn(rules, type)) {
+              core.info('No supported title prefix; existing labels are unchanged.');
+              return;
+            }
+
+            const [name, color, description] = rules[type];
+            const alreadyLabeled = current.labels.some(label =>
+              (typeof label === 'string' ? label : label.name)?.toLowerCase() === name
+            );
+            if (alreadyLabeled) return;
+
+            try {
+              await github.rest.issues.getLabel({ ...context.repo, name });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              try {
+                await github.rest.issues.createLabel({
+                  ...context.repo, name, color, description,
+                });
+              } catch (creationError) {
+                if (creationError.status !== 422) throw creationError;
+                // Another issue/PR may have created the same label concurrently.
+                await github.rest.issues.getLabel({ ...context.repo, name });
+              }
+            }
+
+            // Append only: preserve manually applied and previously added labels.
+            await github.rest.issues.addLabels({ ...params, labels: [name] });
