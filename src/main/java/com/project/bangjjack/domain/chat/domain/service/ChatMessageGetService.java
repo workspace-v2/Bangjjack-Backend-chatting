@@ -23,6 +23,10 @@ public class ChatMessageGetService {
         if (visibleFromMessageId != null) {
             return chatRepository.findByCursorPageAfterMessageId(roomId, cursorId, visibleFromMessageId, PageRequest.of(0, size + 1));
         }
+        if (cursor == null) {
+            // 첫 페이지: id < Long.MAX_VALUE 범위 조건이 있으면 PRIMARY 역방향 스캔이 선택될 수 있어 조건 자체를 뺀다
+            return chatRepository.findFirstPage(roomId, PageRequest.of(0, size + 1));
+        }
         return chatRepository.findByCursorPage(roomId, cursorId, PageRequest.of(0, size + 1));
     }
 
