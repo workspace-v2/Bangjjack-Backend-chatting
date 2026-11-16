@@ -86,6 +86,10 @@ public class ChatRoomGetService {
         return participant;
     }
 
+    public List<Long> findActiveUserIdsByRoomId(Long roomId) {
+        return chatRoomParticipantRepository.findActiveUserIdsByRoomId(roomId);
+    }
+
     public List<Long> findRoomIdsByUserId(Long userId) {
         return chatRoomParticipantRepository.findAllRoomIdsByUserId(userId);
     }

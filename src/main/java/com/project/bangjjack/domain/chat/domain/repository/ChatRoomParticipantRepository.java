@@ -27,6 +27,11 @@ public interface ChatRoomParticipantRepository extends JpaRepository<ChatRoomPar
     @Query("SELECT p.chatRoom.id FROM ChatRoomParticipant p WHERE p.userId = :userId AND p.status = com.project.bangjjack.domain.chat.domain.entity.ParticipantStatus.ACTIVE AND p.deleted = false AND p.chatRoom.deleted = false")
     List<Long> findAllRoomIdsByUserId(@Param("userId") Long userId);
 
+    @Query("SELECT p.userId FROM ChatRoomParticipant p WHERE p.chatRoom.id = :roomId "
+            + "AND p.status = com.project.bangjjack.domain.chat.domain.entity.ParticipantStatus.ACTIVE "
+            + "AND p.deleted = false AND p.chatRoom.deleted = false")
+    List<Long> findActiveUserIdsByRoomId(@Param("roomId") Long roomId);
+
     @Query("SELECT p.lastReadMessageId FROM ChatRoomParticipant p WHERE p.chatRoom.id = :roomId AND p.userId != :userId AND p.deleted = false")
     Optional<Long> findPartnerLastReadMessageId(@Param("roomId") Long roomId, @Param("userId") Long userId);
 

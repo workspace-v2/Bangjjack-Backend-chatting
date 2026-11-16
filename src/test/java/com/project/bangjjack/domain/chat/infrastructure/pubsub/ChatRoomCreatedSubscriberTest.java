@@ -2,6 +2,7 @@ package com.project.bangjjack.domain.chat.infrastructure.pubsub;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bangjjack.domain.chat.application.event.ChatRoomCreatedEvent;
+import com.project.bangjjack.domain.chat.domain.service.ChatRoomGetService;
 import com.project.bangjjack.domain.chat.infrastructure.broadcaster.ChatBroadcaster;
 import com.project.bangjjack.global.infrastructure.websocket.WebSocketSessionStore;
 import com.project.bangjjack.global.jwt.principal.MemberPrincipal;
@@ -30,8 +31,16 @@ class ChatRoomCreatedSubscriberTest {
     private final RedissonClient redis = mock(RedissonClient.class);
     private final WebSocketSessionStore store = new WebSocketSessionStore();
     private final ChatBroadcaster broadcaster = mock(ChatBroadcaster.class);
+    private final ChatRoomGetService roomGetService =
+            mock(ChatRoomGetService.class);
+    private final RoomSubscriptionRecovery recovery = mock(RoomSubscriptionRecovery.class);
+    @org.junit.jupiter.api.BeforeEach
+    void activeParticipants() {
+        given(roomGetService.findActiveUserIdsByRoomId(ROOM_ID)).willReturn(List.of(1L, 2L, 4L));
+    }
+
     private final ChatRoomCreatedSubscriber subscriber = new ChatRoomCreatedSubscriber(
-            redis, new ObjectMapper(), store, mock(RoomSubscriptionRecovery.class), broadcaster);
+            redis, new ObjectMapper(), store, recovery, broadcaster, roomGetService);
 
     private WebSocketSession session(String id, Long userId, boolean open) {
         WebSocketSession session = mock(WebSocketSession.class);
@@ -92,6 +101,93 @@ class ChatRoomCreatedSubscriberTest {
 
         assertThat(store.getSessionsByRoom(ROOM_ID)).hasSize(1);
         verifyNoInteractions(redis);
+    }
+
+    @Test
+    @DisplayName("동시에 도착한 중복 delayed 이벤트도 구독과 재동기화를 한 번만 수행한다")
+    void concurrentDuplicatesAreIdempotent() throws Exception {
+        WebSocketSession active = session("s-1", 1L, true);
+        ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L)).asDelayed();
+        var ready = new java.util.concurrent.CountDownLatch(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<Void> task = () -> {
+                ready.countDown();
+                if (!start.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    throw new AssertionError("start timeout");
+                }
+                subscriber.subscribeActiveSessions(event);
+                return null;
+            };
+            var first = executor.submit(task);
+            var second = executor.submit(task);
+            try {
+                assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            } finally {
+                start.countDown();
+            }
+            first.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            second.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        assertThat(store.getSessionsByRoom(ROOM_ID)).hasSize(1);
+        assertThat(store.isSubscribed(ROOM_ID, active)).isTrue();
+        verify(broadcaster).sendSyncRequired(any(), eq(ROOM_ID));
+    }
+
+    @Test
+    @DisplayName("실제 전송 실패 시 연결을 닫고 새 세션에는 다시 구독과 재동기화를 수행한다")
+    void failedSyncClosesConnectionAndNewSessionCanRecover() throws Exception {
+        var realBroadcaster = new com.project.bangjjack.domain.chat.infrastructure.broadcaster.WebSocketBroadcaster(
+                store, new com.project.bangjjack.global.infrastructure.JsonSerializer(new ObjectMapper()),
+                io.micrometer.tracing.Tracer.NOOP);
+        var realSubscriber = new ChatRoomCreatedSubscriber(
+                redis, new ObjectMapper(), store, recovery, realBroadcaster, roomGetService);
+        WebSocketSession broken = session("broken", 1L, true);
+        org.mockito.Mockito.doThrow(new java.io.IOException("broken pipe")).when(broken).sendMessage(any());
+        ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L)).asDelayed();
+
+        realSubscriber.subscribeActiveSessions(event);
+
+        verify(broken).close(org.springframework.web.socket.CloseStatus.SESSION_NOT_RELIABLE);
+        store.deregisterGlobal(broken);
+        WebSocketSession reconnected = session("reconnected", 1L, true);
+        realSubscriber.subscribeActiveSessions(event);
+
+        assertThat(store.isSubscribed(ROOM_ID, reconnected)).isTrue();
+        var sent = org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.TextMessage.class);
+        verify(reconnected).sendMessage(sent.capture());
+        assertThat(new ObjectMapper().readTree(sent.getValue().getPayload()).get("type").asText())
+                .isEqualTo("SYNC_REQUIRED");
+    }
+
+    @Test
+    @DisplayName("생성 후 나간 참여자는 지연 이벤트가 중복 도착해도 구독하지 않는다")
+    void excludesLeftParticipantFromDelayedEvent() {
+        WebSocketSession left = session("left", 1L, true);
+        WebSocketSession active = session("active", 2L, true);
+        given(roomGetService.findActiveUserIdsByRoomId(ROOM_ID)).willReturn(List.of(2L));
+        ChatRoomCreatedEvent event = new ChatRoomCreatedEvent(ROOM_ID, List.of(1L, 2L)).asDelayed();
+
+        subscriber.subscribeActiveSessions(event);
+        subscriber.subscribeActiveSessions(event);
+
+        assertThat(store.isSubscribed(ROOM_ID, left)).isFalse();
+        assertThat(store.isSubscribed(ROOM_ID, active)).isTrue();
+        verify(broadcaster, never()).sendSyncRequired(argThat(s -> s.getId().equals("left")), any());
+        verify(broadcaster).sendSyncRequired(argThat(s -> s.getId().equals("active")), eq(ROOM_ID));
+    }
+
+    @Test
+    @DisplayName("현재 참여자를 조회하지 못하면 구독하지 않고 복구를 요청한다")
+    void requestsRecoveryOnDatabaseFailure() {
+        WebSocketSession active = session("active", 1L, true);
+        given(roomGetService.findActiveUserIdsByRoomId(ROOM_ID)).willThrow(new RuntimeException("db down"));
+
+        subscriber.subscribeActiveSessions(new ChatRoomCreatedEvent(ROOM_ID, List.of(1L)).asDelayed());
+
+        assertThat(store.isSubscribed(ROOM_ID, active)).isFalse();
+        verifyNoInteractions(broadcaster);
+        verify(recovery).requestRecovery();
     }
 
     @Test

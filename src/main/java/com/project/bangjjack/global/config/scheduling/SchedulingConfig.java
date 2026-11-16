@@ -18,6 +18,15 @@ public class SchedulingConfig {
         return scheduler;
     }
 
+    /** Outbox 폴러·정리 전용. DB I/O 가 WebSocket·일반 예약 작업 스레드를 막지 않도록 분리한다. */
+    @Bean
+    public ThreadPoolTaskScheduler outboxScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("outbox-");
+        return scheduler;
+    }
+
     @Bean
     public ThreadPoolTaskScheduler taskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();

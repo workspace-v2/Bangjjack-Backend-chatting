@@ -18,4 +18,12 @@ public class JsonSerializer {
             throw new RuntimeException("JSON 직렬화 실패: " + obj.getClass().getSimpleName(), e);
         }
     }
+
+    public <T> T deserialize(String json, Class<T> type) {
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("JSON 역직렬화 실패: " + type.getSimpleName(), e);
+        }
+    }
 }
