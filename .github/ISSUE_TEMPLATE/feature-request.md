@@ -1,9 +1,10 @@
 ---
 name: Feature request
-about: 새로운 기능 구현시 사용.
-title: "[FEAT] blahblah "
-labels: 'Feature'
-assignees: ''
+about: 새로운 기능 구현시 사용
+title: "[FEAT]"
+labels: feature
+assignees: xEzIxX
+
 ---
 
 ## 📌 작업 내용
