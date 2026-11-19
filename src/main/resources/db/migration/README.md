@@ -56,7 +56,7 @@ WHERE r.last_message_id IS NULL OR r.last_message_id < latest.last_id;
 
 ### 조회 인덱스 (V5)
 
-`IDX_chat_room_deleted_id (room_id, deleted, id)`: 메시지 페이지가 PRIMARY 역방향 스캔 대신 방 단위로 필요한 행만 읽도록.
+`IDX_chat_room_deleted_id (room_id, deleted, id)`: 메시지 페이지가 PRIMARY 역방향 스캔 대신 방 단위로 필요한 행만 읽도록 (현재 쿼리는 이 인덱스를 힌트로 강제하지 않는다).
 `IDX_participant_user_status (user_id, status, deleted)`: 채팅방 목록의 내 참여 방 조회가 참여자 테이블 전체를 읽지 않도록.
 인덱스 추가만이라 구버전과 호환된다. `ALGORITHM=INPLACE, LOCK=NONE` 으로 쓰기를 막지 않고 만든다.
 
@@ -65,8 +65,10 @@ WHERE r.last_message_id IS NULL OR r.last_message_id < latest.last_id;
   EXPLAIN SELECT * FROM chat WHERE room_id = ? AND id < 9223372036854775807 AND deleted = 0 ORDER BY id DESC LIMIT 31; -- key = IDX_chat_room_deleted_id
   EXPLAIN SELECT * FROM chat_room_participant WHERE user_id = ? AND status = 'ACTIVE' AND deleted = 0;           -- key = IDX_participant_user_status
   ```
-- 메시지 페이지는 인덱스를 추가해도 옵티마이저가 PRIMARY 역방향 스캔을 골랐다 (prefer_ordering_index). 그래서 `ChatRepository` 의
-  메시지 페이지 쿼리 2개가 네이티브 SQL `FORCE INDEX (IDX_chat_room_deleted_id)` 를 쓴다. **이 인덱스 이름을 바꾸거나 지우면 쿼리가 실패한다.**
+- 메시지 페이지는 인덱스를 추가해도 옵티마이저가 PRIMARY 역방향 스캔을 골랐다 (prefer_ordering_index). 이전에는 `FORCE INDEX (IDX_chat_room_deleted_id)` 로
+  고정했으나, 인덱스 이름에 쿼리가 묶이는 한계가 있어 힌트를 제거했다. 대신 첫 페이지(cursor 없음)는 `id < Long.MAX_VALUE` 조건이 없는 쿼리(`findFirstPage`)를 쓴다.
+  검증(dev·로컬 합성 데이터): ANALYZE TABLE 은 계획을 바꾸지 못했고, 위 방식은 가장 큰 방 첫 페이지를 약 88ms → 0.06ms 로 줄였다.
+  한계: 작은 방(500~1,100건)은 filesort 로 1~3ms 가 걸릴 수 있다. 데이터 분포가 달라지면 `EXPLAIN` 으로 다시 확인한다.
 
 ### Outbox 이벤트 테이블 (V6)
 
