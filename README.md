@@ -1,56 +1,33 @@
-# Bangjjack-Backend
+# 방짝 Backend - 채팅 고도화
 
-## 테스트
+기숙사 룸메이트 매칭 서비스 **방짝**의 1:1 채팅 백엔드를 다중 서버·장애 상황 기준으로 다시 설계하고, 개선 전후를 같은 조건에서 측정한 레포입니다.
 
-```bash
-./gradlew test
+- **원본**: 캡스톤 디자인 프로젝트 (2026.03 ~ 2026.06, 팀 5명 중 백엔드 2명) — [Bangjjack/Bangjjack-Backend](https://github.com/Bangjjack/Bangjjack-Backend)
+
+## 기술 스택
+
+| 구분 | 사용 기술 |
+|---|---|
+| Backend | Java 21, Spring Boot 4.0, Spring Data JPA, QueryDSL, WebSocket, Spring Security(OAuth2, JWT) |
+| Data | MySQL, Redis(Redisson Pub/Sub), Flyway |
+| Infra | AWS ECS, ALB, ECR, Terraform, GitHub Actions |
+| 관측·테스트 | OpenTelemetry, Tempo, Prometheus, Grafana, k6, AWS FIS |
+
+## 아키텍처
+
+```
+Client ──WebSocket/HTTP──> ALB ──> ECS Task × 2 (Spring Boot)
+                                      │        │
+                                      │        └── Redis Pub/Sub (서버 간 메시지·방 생성·읽음 이벤트 전달)
+                                      └── MySQL (메시지·seq·Outbox = 기준 데이터)
 ```
 
-채팅 동시성 통합 테스트는 실제 MySQL의 REPEATABLE READ, 행 락, UPDATE의 현재 읽기를 검증합니다.
-`CHAT_TEST_MYSQL_URL`이 없으면 해당 테스트만 건너뜁니다.
-테스트가 Hibernate `create-drop`을 사용하므로 반드시 별도로 만든 폐기 가능한 테스트 DB를 지정하세요.
-서버 버전은 배포 환경과 맞추는 것을 권장합니다.
+- 각 서버는 자기에게 붙은 WebSocket 세션만 로컬에서 관리하고, 이벤트는 Redis Pub/Sub으로 모든 서버에 전달합니다.
+- Pub/Sub은 유실될 수 있다는 전제로, **DB를 원본 데이터로 두고 빠진 메시지·구독을 DB에서 복구**합니다.
 
-```bash
-CHAT_TEST_MYSQL_URL='jdbc:mysql://127.0.0.1:3306/chat_state_test' \
-CHAT_TEST_MYSQL_USER='test_user' \
-CHAT_TEST_MYSQL_PASSWORD='test_password' \
-./gradlew test --tests '*ChatStateMysqlIntegrationTest'
-```
+## 주요 개선 기능
 
-검증 항목: LEFT 참여자를 미리 조회한 두 전송의 unread 누적, 오래된 스냅샷에서의 읽음·퇴장,
-READ 커서의 단조 증가, 잘못된 메시지 ID 거부, 재입장 응답의 최신 상태,
-카테고리 변경 시 동시 전송의 마지막 메시지 시각 보존.
-
-## 다중 서버 WebSocket 세션 관리
-
-각 서버는 자신에게 연결된 세션과 방 구독을 로컬 `WebSocketSessionStore`에서 관리합니다.
-방 생성·채팅 메시지·읽음 이벤트는 Redis Pub/Sub으로 각 서버에 전달하고,
-수신 서버는 자신의 로컬 세션에만 구독 또는 전송을 적용합니다.
-전역 세션 목록을 조회하는 기능이 없어 Redis 세션 레지스트리와 서버 heartbeat·sweep은 사용하지 않습니다.
-서버가 종료되면 로컬 세션 정보도 사라지므로 다른 서버가 종료된 서버의 세션을 삭제할 필요가 없습니다.
-
-클라이언트 연결 확인은 서버마다 실행하는 `WebSocketKeepAlive`가 담당합니다.
-WebSocket I/O는 전용 `webSocketKeepAliveScheduler`를 사용하며 일반 예약 작업의 `taskScheduler`와 분리합니다.
-`chat.ws.ping-interval-ms`(기본 20000), `chat.ws.pong-timeout-ms`(기본 60000)로 주기를 설정합니다.
-`chat.ws.sessions.local`, `chat.ws.pong.timeout.closed` 메트릭은 유지합니다.
-
-이전 버전의 `ws:sessions:*`, `ws:session-owners`, `ws:server-sessions:*`, `ws:servers` 키는
-새 버전에서 읽거나 갱신하지 않습니다. 구버전 서버가 모두 종료된 뒤 해당 레지스트리 키를 별도로 정리할 수 있습니다.
-기존 `chat.ws.server-heartbeat-*`, `chat.ws.zombie-sweep-*` 설정과 레지스트리 정리 메트릭은 더 이상 사용하지 않습니다.
-WebSocket 연결 시 DB에서 참여 방 목록을 조회해 초기 구독합니다.
-
-Redis 연결이 끊긴 동안 발행된 방 생성 이벤트는 다시 전달되지 않으므로 다음 두 경로로 복구합니다.
-- 수신 쪽: 방 생성 채널이 재구독되면(`onSubscribe`) 로컬 세션의 참여 방을 DB에서 다시 조회해 빠진 방을 구독하고,
-  새로 구독한 방에 `SYNC_REQUIRED`를 보내 끊긴 동안의 메시지를 동기화 API로 받게 합니다 (`chat.ws.room-subscription.recovered`).
-  재동기화 신호 전송에 실패하면 연결을 닫아 클라이언트 재연결(DB 기준 초기 구독 + 동기화)로 복구합니다.
-  클라이언트가 `UNSUBSCRIBE`로 직접 해제한 방(실제로 구독 중이던 방만 기록)은 다시 구독하지 않으며, 참여 방 조회에 실패한 사용자는
-  `chat.ws.room-subscription.recovery-retry-delay-ms`(기본 5000) 간격으로 최대 `recovery-max-retries`(기본 5)회 다시 복구합니다
-  (한도 초과 `chat.ws.room-subscription.recovery.failed`).
-- 발행 쪽: 이 서버의 Redis 연결이 끊겨 발행에 실패하면 다른 서버는 재구독이 일어나지 않아 알 수 없으므로,
-  발행 대기열 초과로 버려진 경우도 포함해 `chat.pubsub.room-created.retry-interval-ms`(기본 5000) 간격으로, 첫 실패부터 `chat.pubsub.room-created.retry-for-ms`(기본 180000 = 3분) 동안 다시 발행합니다.
-  3분은 측정한 Redis 최대 다운 시간(약 2.5분)보다 긴 값이며, 더 긴 장애는 클라이언트 재연결 시 DB 기준 초기 구독으로 복구됩니다.
-  재발행 이벤트는 `delayed`로 표시해 수신 서버가 새로 구독한 세션에 `SYNC_REQUIRED`를 보냅니다 (한도 초과 `chat.pubsub.room-created.retry.exhausted`).
-- 알려진 한계: 발행 서버의 Redis 장애가 재발행 기간(3분)보다 길면 방 생성 이벤트는 버려지고,
-  다른 서버의 참여자는 재연결(또는 클라이언트의 `SUBSCRIBE`) 전까지 새 방에 구독되지 않습니다.
-- `delayed`는 false일 때 JSON에서 빠지므로 일반 이벤트 형식은 이전 버전과 같습니다.
+- 1:1 채팅방 생성·메시지 전송·읽음 처리 (WebSocket)
+- 다중 서버 환경의 실시간 전달 (Redis Pub/Sub)
+- Redis 장애 시 누락 메시지·구독 복구 (채팅방별 seq 동기화, Transactional Outbox)
+- 부하·장애 측정 환경 분리: `main`(개선 전 기준) / `dev`(개선 후)
