@@ -15,12 +15,7 @@
 
 ## 아키텍처
 
-```
-Client ──WebSocket/HTTP──> ALB ──> ECS Task × 2 (Spring Boot)
-                                      │        │
-                                      │        └── Redis Pub/Sub (서버 간 메시지·방 생성·읽음 이벤트 전달)
-                                      └── MySQL (메시지·seq·Outbox = 기준 데이터)
-```
+<img width="1000" height="auto" alt="image" src="https://github.com/user-attachments/assets/2ff77aa2-c4c4-417f-a409-5f12ef936631" />
 
 - 각 서버는 자기에게 붙은 WebSocket 세션만 로컬에서 관리하고, 이벤트는 Redis Pub/Sub으로 모든 서버에 전달합니다.
 - Pub/Sub은 유실될 수 있다는 전제로, **DB를 원본 데이터로 두고 빠진 메시지·구독을 DB에서 복구**합니다.
