@@ -27,7 +27,7 @@ jobs:
 
   publish:
     needs: [verify, dependency-scan]
-    uses: workspace-v2/community-service/.github/workflows/deploy-blue-green.yml@af71f98dd30a2665af0f92cff02a65d26c1fd6c7
+    uses: workspace-v2/community-service/.github/workflows/deploy-blue-green.yml@2430ebee7ea96cd63070763a72e65325b410b431
     permissions:
       contents: read
       packages: write
