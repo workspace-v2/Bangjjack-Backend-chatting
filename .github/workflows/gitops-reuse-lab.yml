@@ -27,7 +27,7 @@ jobs:
 
   publish:
     needs: [verify, dependency-scan]
-    uses: workspace-v2/community-service/.github/workflows/deploy-blue-green.yml@eb3deb883b0311726dfb9e624c6f2839ac710d9c
+    uses: workspace-v2/community-service/.github/workflows/deploy-blue-green.yml@af71f98dd30a2665af0f92cff02a65d26c1fd6c7
     permissions:
       contents: read
       packages: write
@@ -39,4 +39,7 @@ jobs:
       helm-chart: lab/bangjjack-reuse
       helm-release: bangjjack-reuse
       namespace: bangjjack-reuse
-      update-gitops: false
+      update-gitops: true
+      gitops-app-client-id: ${{ vars.GITOPS_APP_CLIENT_ID }}
+    secrets:
+      gitops-app-private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
