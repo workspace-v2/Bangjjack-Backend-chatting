@@ -1,0 +1,42 @@
+name: GitOps Workflow Reuse Lab
+
+on:
+  push:
+    branches: [cicd/gitops-reuse-lab]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitops-reuse-lab
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    uses: workspace-v2/community-service/.github/workflows/verify-java.yml@eb3deb883b0311726dfb9e624c6f2839ac710d9c
+    with:
+      run-mysql-integration: false
+
+  dependency-scan:
+    name: Java dependency scan
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: workspace-v2/community-service/.github/actions/scan-java-jar@eb3deb883b0311726dfb9e624c6f2839ac710d9c
+
+  publish:
+    needs: [verify, dependency-scan]
+    uses: workspace-v2/community-service/.github/workflows/deploy-blue-green.yml@eb3deb883b0311726dfb9e624c6f2839ac710d9c
+    permissions:
+      contents: read
+      packages: write
+    with:
+      dockerfile: Dockerfile
+      image-repository: ghcr.io/workspace-v2/bangjjack-gitops-reuse-lab
+      gitops-repository: workspace-v2/k8s-pilot
+      gitops-branch: cicd/bangjjack-reuse-lab
+      helm-chart: lab/bangjjack-reuse
+      helm-release: bangjjack-reuse
+      namespace: bangjjack-reuse
+      update-gitops: false
